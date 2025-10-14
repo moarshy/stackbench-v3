@@ -1,0 +1,57 @@
+[project]
+name = "stackbench"
+version = "0.1.0"
+description = "Documentation Quality Validation Tool - Validate API signatures and code examples in documentation"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+    { name = "Stackbench Team" }
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Documentation",
+    "Topic :: Software Development :: Quality Assurance",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "claude-agent-sdk>=0.1.0",
+    "pydantic>=2.0",
+    "GitPython>=3.1.0",
+    "rich>=13.0.0",
+    "typer>=0.9.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.scripts]
+stackbench = "stackbench.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/yourusername/stackbench"
+Repository = "https://github.com/yourusername/stackbench"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21.0",
+    "ruff>=0.1.0",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+ignore = ["E501"]  # Line too long (handled by formatter)
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
