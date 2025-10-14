@@ -6,14 +6,18 @@ import type {
   CCAPISignatureValidationOutput,
   CCCodeExampleValidationOutput,
   DSpyAPISignatureValidationOutput,
-  DSpyCodeExampleValidationOutput
+  DSpyCodeExampleValidationOutput,
+  RunInfo as RunInfoType
 } from './types';
 import { apiService } from './services/api';
 import { Settings } from './components/Settings';
 import { MarkdownViewer } from './components/MarkdownViewer';
 import { Tabs, TabPanel } from './components/Tabs';
+import { RunSelector } from './components/RunSelector';
+import { RunInfo } from './components/RunInfo';
 
 function App() {
+  const [selectedRun, setSelectedRun] = useState<RunInfoType | null>(null);
   const [selectedDoc, setSelectedDoc] = useState<string | null>(null);
   const [docs, setDocs] = useState<string[]>([]);
   const [docContent, setDocContent] = useState<string>('');
@@ -28,17 +32,57 @@ function App() {
   const [activeTab, setActiveTab] = useState('extraction');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
-  // Load documentation files on mount
+  // Parse URL parameters on mount
   useEffect(() => {
-    loadDocs();
+    const params = new URLSearchParams(window.location.search);
+    const runId = params.get('run');
+    const docName = params.get('doc');
+    const tab = params.get('tab');
+
+    // If run ID in URL, we'll let RunSelector handle loading it
+    // This is just for updating the doc and tab after the run loads
+    if (docName) {
+      setSelectedDoc(docName);
+    }
+    if (tab) {
+      setActiveTab(tab);
+    }
   }, []);
+
+  // Update URL when selections change
+  useEffect(() => {
+    if (selectedRun || selectedDoc || activeTab !== 'extraction') {
+      const params = new URLSearchParams();
+      if (selectedRun) {
+        params.set('run', selectedRun.run_id);
+      }
+      if (selectedDoc) {
+        params.set('doc', selectedDoc);
+      }
+      if (activeTab !== 'extraction') {
+        params.set('tab', activeTab);
+      }
+      const newUrl = `${window.location.pathname}${params.toString() ? '?' + params.toString() : ''}`;
+      window.history.replaceState({}, '', newUrl);
+    }
+  }, [selectedRun, selectedDoc, activeTab]);
+
+  // Load documentation files when run is selected
+  useEffect(() => {
+    if (selectedRun) {
+      apiService.setRunId(selectedRun.run_id);
+      loadDocs();
+      // Reset selected doc when run changes
+      setSelectedDoc(null);
+    }
+  }, [selectedRun]);
 
   // Load data when document is selected
   useEffect(() => {
-    if (selectedDoc) {
+    if (selectedDoc && selectedRun) {
       loadDocumentData(selectedDoc);
     }
-  }, [selectedDoc]);
+  }, [selectedDoc, selectedRun]);
 
   const loadDocs = async () => {
     try {
@@ -114,7 +158,11 @@ function App() {
               <ChevronLeft className="h-4 w-4" />
             </button>
           </div>
-          <div className="p-2 flex-1 overflow-auto">
+          <div className="p-2 flex-1 overflow-auto flex flex-col gap-3">
+            {/* Run Info Card */}
+            {selectedRun && <RunInfo runInfo={selectedRun} />}
+
+            {/* Doc Search and List */}
             <div className="relative mb-2">
               <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
               <input
@@ -124,6 +172,11 @@ function App() {
               />
             </div>
             <div className="space-y-1">
+              {docs.length === 0 && selectedRun && (
+                <div className="px-3 py-2 text-sm text-muted-foreground">
+                  No documentation files found in this run.
+                </div>
+              )}
               {docs.map((doc) => (
                 <button
                   key={doc}
@@ -146,8 +199,8 @@ function App() {
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}
         <header className="border-b border-border bg-card px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-4 flex-1">
               {/* Expand Button (when collapsed) */}
               {sidebarCollapsed && (
                 <button
@@ -164,17 +217,23 @@ function App() {
                   <span className="text-sm font-medium pointer-events-none">Docs</span>
                 </button>
               )}
-              <div>
+              <div className="flex-1">
                 <h1 className="text-2xl font-bold">StackBench Documentation Validator</h1>
                 <p className="text-sm text-muted-foreground">
-                  View documentation, extraction results, and AST validation
+                  View documentation, extraction results, and validation
                 </p>
               </div>
             </div>
             <div className="flex items-center gap-4">
+              {/* Run Selector */}
+              <RunSelector
+                selectedRun={selectedRun}
+                onRunSelect={setSelectedRun}
+                baseDataDir={apiService.getBaseDataDir()}
+              />
               {selectedDoc && (
-                <div className="flex items-center gap-2 text-sm">
-                  <span className="text-muted-foreground">Selected:</span>
+                <div className="flex items-center gap-2 text-sm px-3 py-1.5 bg-accent rounded-md">
+                  <FileText className="h-4 w-4" />
                   <span className="font-medium">{selectedDoc}</span>
                 </div>
               )}
@@ -190,7 +249,18 @@ function App() {
         </header>
 
         {/* Two-Pane Layout */}
-        {!selectedDoc ? (
+        {!selectedRun ? (
+          <div className="flex-1 flex items-center justify-center text-center p-6">
+            <div>
+              <Play className="h-16 w-16 mx-auto text-muted-foreground mb-4" />
+              <h3 className="text-xl font-semibold mb-2">No Run Selected</h3>
+              <p className="text-muted-foreground max-w-md">
+                Select a validation run from the dropdown above, or run the stackbench CLI first:<br />
+                <code className="mt-2 inline-block px-2 py-1 bg-muted rounded text-sm">stackbench run --repo ...</code>
+              </p>
+            </div>
+          </div>
+        ) : !selectedDoc ? (
           <div className="flex-1 flex items-center justify-center text-center p-6">
             <div>
               <FileText className="h-16 w-16 mx-auto text-muted-foreground mb-4" />
@@ -214,7 +284,7 @@ function App() {
                 ) : (
                   <MarkdownViewer
                     content={docContent}
-                    baseImagePath={apiService.getConfig().docsPath}
+                    baseImagePath={selectedRun ? `${apiService.getBaseDataDir()}/${selectedRun.run_id}/repository` : ''}
                   />
                 )}
               </div>

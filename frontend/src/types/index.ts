@@ -291,3 +291,23 @@ export interface DSpyCodeExampleValidationOutput {
   venv_path: string;
   warnings: string[];
 }
+
+// ============================================================================
+// Run Management Types
+// ============================================================================
+
+export interface RunMetadata {
+  run_id: string;
+  repo_url: string;
+  analysis_type: string;
+  created_at: string;
+  completed_at: string | null;
+  status: 'initializing' | 'cloned' | 'completed' | 'error';
+}
+
+export interface RunInfo {
+  run_id: string;
+  metadata: RunMetadata;
+  display_name: string; // Formatted for display
+  created_date: Date;
+}

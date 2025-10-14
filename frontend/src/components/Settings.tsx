@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Settings as SettingsIcon, X } from 'lucide-react';
+import { Settings as SettingsIcon, X, FolderOpen } from 'lucide-react';
 import { apiService } from '../services/api';
 
 interface SettingsProps {
@@ -8,17 +8,11 @@ interface SettingsProps {
 
 export function Settings({ onClose }: SettingsProps) {
   const config = apiService.getConfig();
-  const [repoPath, setRepoPath] = useState(config.repoPath);
-  const [docsPath, setDocsPath] = useState(config.docsPath);
-  const [extractionOutputPath, setExtractionOutputPath] = useState(config.extractionOutputPath);
-  const [validationOutputPath, setValidationOutputPath] = useState(config.validationOutputPath);
+  const [baseDataDir, setBaseDataDir] = useState(config.baseDataDir);
 
   const handleSave = () => {
     apiService.updateConfig({
-      repoPath,
-      docsPath,
-      extractionOutputPath,
-      validationOutputPath,
+      baseDataDir,
     });
     onClose();
     // Reload the page to apply new settings
@@ -42,68 +36,49 @@ export function Settings({ onClose }: SettingsProps) {
         </div>
 
         <div className="p-6 space-y-6">
-          <div>
-            <label className="block text-sm font-medium mb-2">
-              Repository Path
-            </label>
-            <input
-              type="text"
-              value={repoPath}
-              onChange={(e) => setRepoPath(e.target.value)}
-              className="w-full px-3 py-2 border border-input rounded-md bg-background text-sm"
-              placeholder="/path/to/stackbench-v2"
-            />
-            <p className="text-xs text-muted-foreground mt-1">
-              Root path of the StackBench repository
-            </p>
+          <div className="p-4 bg-blue-50 border border-blue-200 rounded-md">
+            <div className="flex items-start gap-3">
+              <FolderOpen className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
+              <div className="text-sm text-blue-900">
+                <p className="font-medium mb-1">Data Directory Configuration</p>
+                <p className="text-xs text-blue-700">
+                  The base data directory contains all stackbench validation runs. Each run is stored in a
+                  subdirectory with a unique ID. When you run <code className="px-1 py-0.5 bg-blue-100 rounded">stackbench run</code>,
+                  results are automatically saved here.
+                </p>
+              </div>
+            </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-2">
-              Documentation Path
+            <label className="block text-sm font-medium mb-2 flex items-center gap-2">
+              <FolderOpen className="h-4 w-4" />
+              Base Data Directory
             </label>
             <input
               type="text"
-              value={docsPath}
-              onChange={(e) => setDocsPath(e.target.value)}
-              className="w-full px-3 py-2 border border-input rounded-md bg-background text-sm"
-              placeholder="/path/to/docs/src/python"
+              value={baseDataDir}
+              onChange={(e) => setBaseDataDir(e.target.value)}
+              className="w-full px-3 py-2 border border-input rounded-md bg-background text-sm font-mono"
+              placeholder="/path/to/stackbench-v3/data"
             />
             <p className="text-xs text-muted-foreground mt-1">
-              Path to the documentation markdown files
+              Directory where stackbench stores validation run results
             </p>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium mb-2">
-              Extraction Output Path
-            </label>
-            <input
-              type="text"
-              value={extractionOutputPath}
-              onChange={(e) => setExtractionOutputPath(e.target.value)}
-              className="w-full px-3 py-2 border border-input rounded-md bg-background text-sm"
-              placeholder="/path/to/extraction_output"
-            />
-            <p className="text-xs text-muted-foreground mt-1">
-              Path to the extraction output JSON files
-            </p>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium mb-2">
-              Validation Output Path
-            </label>
-            <input
-              type="text"
-              value={validationOutputPath}
-              onChange={(e) => setValidationOutputPath(e.target.value)}
-              className="w-full px-3 py-2 border border-input rounded-md bg-background text-sm"
-              placeholder="/path/to/ast_validation_output"
-            />
-            <p className="text-xs text-muted-foreground mt-1">
-              Path to the AST validation output JSON files
-            </p>
+          <div className="pt-4 border-t border-border">
+            <h3 className="text-sm font-semibold mb-2">Expected Structure</h3>
+            <pre className="text-xs bg-muted p-3 rounded overflow-x-auto">
+{`data/
+└── {run-uuid}/
+    ├── metadata.json
+    ├── repository/
+    └── results/
+        ├── extraction/
+        ├── api_validation/
+        └── code_validation/`}
+            </pre>
           </div>
         </div>
 
