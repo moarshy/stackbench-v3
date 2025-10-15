@@ -391,16 +391,53 @@ class APISignatureValidationAgent:
                 print(f"   Context: ...{response_text[max(0, json_start-50):json_start+100]}...")
             return None
 
-    async def get_claude_response(self, client: ClaudeSDKClient, prompt: str) -> str:
-        """Send prompt to Claude and get text response."""
+    async def get_claude_response(self, client: ClaudeSDKClient, prompt: str, logger=None, messages_log_file=None) -> str:
+        """Send prompt to Claude and get text response, logging all messages."""
+        # Log the user prompt
+        if messages_log_file:
+            user_message_entry = {
+                "timestamp": datetime.now().isoformat(),
+                "role": "user",
+                "content": prompt
+            }
+            with open(messages_log_file, 'a') as f:
+                f.write(json.dumps(user_message_entry) + '\n')
+
         await client.query(prompt)
 
         response_text = ""
         async for message in client.receive_response():
             if isinstance(message, AssistantMessage):
-                for block in message.content:
-                    if isinstance(block, TextBlock):
-                        response_text += block.text
+                # Log the full assistant message
+                if messages_log_file:
+                    # Convert message blocks to serializable format
+                    message_content = []
+                    for block in message.content:
+                        if isinstance(block, TextBlock):
+                            message_content.append({
+                                "type": "text",
+                                "text": block.text
+                            })
+                            response_text += block.text
+                        else:
+                            # Handle other block types
+                            message_content.append({
+                                "type": type(block).__name__,
+                                "data": str(block)
+                            })
+
+                    assistant_message_entry = {
+                        "timestamp": datetime.now().isoformat(),
+                        "role": "assistant",
+                        "content": message_content
+                    }
+                    with open(messages_log_file, 'a') as f:
+                        f.write(json.dumps(assistant_message_entry) + '\n')
+                else:
+                    # Original behavior when no logger
+                    for block in message.content:
+                        if isinstance(block, TextBlock):
+                            response_text += block.text
 
         return response_text
 
@@ -448,6 +485,7 @@ class APISignatureValidationAgent:
         # Create per-document logger with new directory structure
         from stackbench.hooks import create_agent_hooks, AgentLogger
 
+        messages_log_file = None
         if self.validation_log_dir:
             doc_stem = extraction_file.stem.replace('_analysis', '')
             # New structure: logs/api_signature_logs/<doc_name>/
@@ -456,6 +494,7 @@ class APISignatureValidationAgent:
 
             agent_log = api_logs_dir / "agent.log"
             tools_log = api_logs_dir / "tools.jsonl"
+            messages_log_file = api_logs_dir / "messages.jsonl"
             logger = AgentLogger(agent_log, tools_log)
         else:
             logger = None
@@ -520,7 +559,7 @@ class APISignatureValidationAgent:
                 signatures_json=signatures_json
             )
 
-            response_text = await self.get_claude_response(client, prompt)
+            response_text = await self.get_claude_response(client, prompt, logger, messages_log_file)
             validation_data = self.extract_json_from_response(response_text)
 
             if not validation_data:

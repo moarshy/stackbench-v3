@@ -86,8 +86,8 @@ Document: {page}
 Examples to validate:
 {examples_json}
 
-Instructions:
-1. Create a virtual environment
+TASK:
+1. Create a virtual environment using Bash tool
 2. Install {library}=={version} and all required dependencies
 3. For each example:
    - Check if it depends on previous examples (uses undefined variables)
@@ -96,19 +96,28 @@ Instructions:
    - Capture output, errors, and suggestions
 4. Clean up the environment when done
 
-For each example, provide a JSON response with:
-{{
-  "example_index": <int>,
-  "status": "success|failure|skipped",
-  "error_message": "<error if failed>",
-  "suggestions": "<how to fix or improve>",
-  "execution_output": "<stdout/stderr>",
-  "depends_on_previous": <bool>
-}}
+CRITICAL: Respond with ONLY the JSON array below. No explanatory text before or after. Just the JSON.
 
-Respond with a JSON array of validation results.
+RESPONSE FORMAT - JSON ONLY:
 
-IMPORTANT: Actually run the code using Bash tool. Create virtualenv, install packages, execute code, report results."""
+```json
+[
+  {{
+    "example_index": 0,
+    "status": "success|failure|skipped",
+    "error_message": "error details if failed",
+    "suggestions": "how to fix or improve",
+    "execution_output": "stdout/stderr output",
+    "depends_on_previous": false
+  }}
+]
+```
+
+IMPORTANT:
+- Use actual Bash tool execution to run the code
+- Create virtualenv, install packages, execute code
+- Report actual execution results
+- Respond with ONLY the JSON array, no other text"""
 
 
 # ============================================================================
@@ -156,7 +165,7 @@ class ValidationAgent:
     def extract_json_from_response(self, response_text: str) -> Optional[List[Dict]]:
         """Extract JSON array from Claude's response."""
         try:
-            # Try to find JSON in markdown code blocks
+            # Strategy 1: Try to find JSON in markdown code blocks
             if "```json" in response_text:
                 start = response_text.find("```json") + 7
                 end = response_text.find("```", start)
@@ -167,24 +176,106 @@ class ValidationAgent:
                 end = response_text.find("```", start)
                 json_text = response_text[start:end].strip()
                 return json.loads(json_text)
-            else:
-                # Try parsing the whole response
-                return json.loads(response_text)
+
+            # Strategy 2: Look for JSON array markers [ ]
+            # Find the first [ and try to parse from there
+            start_idx = response_text.find('[')
+            if start_idx != -1:
+                # Try to parse from this point
+                try:
+                    # Find matching closing bracket by counting
+                    bracket_count = 0
+                    in_string = False
+                    escape_next = False
+
+                    for i in range(start_idx, len(response_text)):
+                        char = response_text[i]
+
+                        if escape_next:
+                            escape_next = False
+                            continue
+
+                        if char == '\\':
+                            escape_next = True
+                            continue
+
+                        if char == '"':
+                            in_string = not in_string
+                            continue
+
+                        if not in_string:
+                            if char == '[':
+                                bracket_count += 1
+                            elif char == ']':
+                                bracket_count -= 1
+                                if bracket_count == 0:
+                                    # Found complete JSON array
+                                    json_text = response_text[start_idx:i+1]
+                                    return json.loads(json_text)
+
+                except Exception:
+                    pass
+
+            # Strategy 3: Try parsing the whole response
+            return json.loads(response_text.strip())
+
         except json.JSONDecodeError as e:
             print(f"⚠️  JSON parsing error: {e}")
             print(f"   Response preview: {response_text[:500]}...")
+            # Try to show where the JSON might be
+            if '[' in response_text:
+                json_start = response_text.find('[')
+                print(f"   Found '[' at position {json_start}")
+                print(f"   Context: ...{response_text[max(0, json_start-50):json_start+100]}...")
             return None
 
-    async def get_claude_response(self, client: ClaudeSDKClient, prompt: str) -> str:
-        """Send prompt to Claude and get text response."""
+    async def get_claude_response(self, client: ClaudeSDKClient, prompt: str, logger=None, messages_log_file=None) -> str:
+        """Send prompt to Claude and get text response, logging all messages."""
+        # Log the user prompt
+        if messages_log_file:
+            user_message_entry = {
+                "timestamp": datetime.now().isoformat(),
+                "role": "user",
+                "content": prompt
+            }
+            with open(messages_log_file, 'a') as f:
+                f.write(json.dumps(user_message_entry) + '\n')
+
         await client.query(prompt)
 
         response_text = ""
         async for message in client.receive_response():
             if isinstance(message, AssistantMessage):
-                for block in message.content:
-                    if isinstance(block, TextBlock):
-                        response_text += block.text
+                # Log the full assistant message
+                if messages_log_file:
+                    # Convert message blocks to serializable format
+                    message_content = []
+                    for block in message.content:
+                        if isinstance(block, TextBlock):
+                            message_content.append({
+                                "type": "text",
+                                "text": block.text
+                            })
+                            response_text += block.text
+                        else:
+                            # Handle other block types
+                            message_content.append({
+                                "type": type(block).__name__,
+                                "data": str(block)
+                            })
+
+                    assistant_message_entry = {
+                        "timestamp": datetime.now().isoformat(),
+                        "role": "assistant",
+                        "content": message_content
+                    }
+                    with open(messages_log_file, 'a') as f:
+                        f.write(json.dumps(assistant_message_entry) + '\n')
+                else:
+                    # Original behavior when no logger
+                    for block in message.content:
+                        if isinstance(block, TextBlock):
+                            response_text += block.text
 
         return response_text
 
@@ -203,6 +294,7 @@ class ValidationAgent:
         # Create per-document logger with new directory structure
         from stackbench.hooks import create_agent_hooks, AgentLogger
 
+        messages_log_file = None
         if self.validation_log_dir:
             doc_stem = extraction_file.stem.replace('_analysis', '')
             # New structure: logs/code_example_logs/<doc_name>/
@@ -211,6 +303,7 @@ class ValidationAgent:
 
             agent_log = code_logs_dir / "agent.log"
             tools_log = code_logs_dir / "tools.jsonl"
+            messages_log_file = code_logs_dir / "messages.jsonl"
             logger = AgentLogger(agent_log, tools_log)
         else:
             logger = None
@@ -256,7 +349,7 @@ class ValidationAgent:
                 examples_json=examples_json
             )
 
-            response_text = await self.get_claude_response(client, prompt)
+            response_text = await self.get_claude_response(client, prompt, logger, messages_log_file)
 
             # Parse results
             validation_results = self.extract_json_from_response(response_text)

@@ -349,17 +349,54 @@ class DocumentationExtractionAgent:
             print(f"   Response preview: {response_text[:300]}...")
             return None
     
-    async def get_claude_response(self, client: ClaudeSDKClient, prompt: str) -> str:
-        """Send prompt to Claude and get text response."""
+    async def get_claude_response(self, client: ClaudeSDKClient, prompt: str, logger=None, messages_log_file=None) -> str:
+        """Send prompt to Claude and get text response, logging all messages."""
+        # Log the user prompt
+        if messages_log_file:
+            user_message_entry = {
+                "timestamp": datetime.now().isoformat(),
+                "role": "user",
+                "content": prompt
+            }
+            with open(messages_log_file, 'a') as f:
+                f.write(json.dumps(user_message_entry) + '\n')
+
         await client.query(prompt)
-        
+
         response_text = ""
         async for message in client.receive_response():
             if isinstance(message, AssistantMessage):
-                for block in message.content:
-                    if isinstance(block, TextBlock):
-                        response_text += block.text
-        
+                # Log the full assistant message
+                if messages_log_file:
+                    # Convert message blocks to serializable format
+                    message_content = []
+                    for block in message.content:
+                        if isinstance(block, TextBlock):
+                            message_content.append({
+                                "type": "text",
+                                "text": block.text
+                            })
+                            response_text += block.text
+                        else:
+                            # Handle other block types
+                            message_content.append({
+                                "type": type(block).__name__,
+                                "data": str(block)
+                            })
+
+                    assistant_message_entry = {
+                        "timestamp": datetime.now().isoformat(),
+                        "role": "assistant",
+                        "content": message_content
+                    }
+                    with open(messages_log_file, 'a') as f:
+                        f.write(json.dumps(assistant_message_entry) + '\n')
+                else:
+                    # Original behavior when no logger
+                    for block in message.content:
+                        if isinstance(block, TextBlock):
+                            response_text += block.text
+
         return response_text
     
     async def analyze_document(self, doc_path: Path, library_name: Optional[str] = None) -> DocumentAnalysis:
@@ -388,6 +425,7 @@ class DocumentationExtractionAgent:
         # Create per-document logger with new directory structure
         from stackbench.hooks import create_agent_hooks, AgentLogger
 
+        messages_log_file = None
         if self.validation_log_dir:
             doc_stem = doc_path.stem
             # New structure: logs/extraction_logs/<doc_name>/
@@ -396,6 +434,7 @@ class DocumentationExtractionAgent:
 
             agent_log = extraction_logs_dir / "agent.log"
             tools_log = extraction_logs_dir / "tools.jsonl"
+            messages_log_file = extraction_logs_dir / "messages.jsonl"
             logger = AgentLogger(agent_log, tools_log)
         else:
             logger = None
@@ -425,7 +464,7 @@ class DocumentationExtractionAgent:
                 repo_root=str(self.repo_root),
                 library_name=library_name
             )
-            response_text = await self.get_claude_response(client, extraction_prompt)
+            response_text = await self.get_claude_response(client, extraction_prompt, logger, messages_log_file)
 
             # Parse response
             extracted_data = self.extract_json_from_response(response_text)
