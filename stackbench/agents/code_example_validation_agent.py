@@ -118,10 +118,13 @@ IMPORTANT: Actually run the code using Bash tool. Create virtualenv, install pac
 class ValidationAgent:
     """Agent that validates code examples using Claude Code."""
 
-    def __init__(self, extraction_output_folder: Path, validation_output_folder: Path):
+    def __init__(self, extraction_output_folder: Path, validation_output_folder: Path, num_workers: int = 5):
         self.extraction_output_folder = Path(extraction_output_folder)
         self.validation_output_folder = Path(validation_output_folder)
         self.validation_output_folder.mkdir(parents=True, exist_ok=True)
+        self.num_workers = num_workers
+
+        print(f"👷 Code Validation Workers: {self.num_workers}")
 
         self.options = ClaudeAgentOptions(
             system_prompt=VALIDATION_SYSTEM_PROMPT,
