@@ -294,17 +294,21 @@ Return JSON:
 class APISignatureValidationAgent:
     """Agent that validates API signatures using Claude Code and Python introspection."""
 
-    def __init__(self, extraction_folder: Path, output_folder: Path):
+    def __init__(self, extraction_folder: Path, output_folder: Path, num_workers: int = 5):
         """
         Initialize the validation agent.
 
         Args:
             extraction_folder: Path to extraction output folder
             output_folder: Path to save validation results
+            num_workers: Number of parallel workers for validation (default: 5)
         """
         self.extraction_folder = Path(extraction_folder)
         self.output_folder = Path(output_folder)
         self.output_folder.mkdir(parents=True, exist_ok=True)
+        self.num_workers = num_workers
+
+        print(f"👷 API Validation Workers: {self.num_workers}")
 
         # Configure Claude options
         self.options = ClaudeAgentOptions(
@@ -642,8 +646,39 @@ class APISignatureValidationAgent:
                 warnings=warnings
             )
 
+    async def _validate_document_with_save(
+        self,
+        extraction_file: Path,
+        semaphore: asyncio.Semaphore,
+        progress: Dict[str, int]
+    ) -> Optional[ValidationOutput]:
+        """Validate a single document with semaphore control and save results."""
+        async with semaphore:
+            try:
+                validation_output = await self.validate_document(extraction_file)
+
+                # Save validation output
+                output_file = self.output_folder / f"{extraction_file.stem}_validation.json"
+                with open(output_file, 'w', encoding='utf-8') as f:
+                    f.write(validation_output.model_dump_json(indent=2))
+
+                progress['completed'] += 1
+                print(f"   💾 [{progress['completed']}/{progress['total']}] Saved {extraction_file.name}")
+
+                return validation_output
+
+            except Exception as e:
+                progress['completed'] += 1
+                print(f"   ❌ [{progress['completed']}/{progress['total']}] Error processing {extraction_file.name}: {e}")
+                import traceback
+                traceback.print_exc()
+                return None
+
     async def validate_all_documents(self):
-        """Validate all extraction files in the extraction folder."""
+        """Validate all extraction files using parallel workers."""
+        # Track overall validation time
+        validation_start_time = datetime.now()
+
         # Find all extraction analysis files
         extraction_files = list(self.extraction_folder.glob("*_analysis.json"))
         extraction_files = [f for f in extraction_files if f.name != "extraction_summary.json"]
@@ -654,27 +689,29 @@ class APISignatureValidationAgent:
 
         print(f"\n📚 Found {len(extraction_files)} extraction files to validate")
         print(f"📁 Output folder: {self.output_folder}")
+        print(f"👷 Using {self.num_workers} parallel workers")
 
-        results = []
+        # Create semaphore to limit concurrent workers
+        semaphore = asyncio.Semaphore(self.num_workers)
 
-        for idx, extraction_file in enumerate(extraction_files, 1):
-            print(f"\n[{idx}/{len(extraction_files)}] Processing {extraction_file.name}...")
+        # Progress tracking
+        progress = {'completed': 0, 'total': len(extraction_files)}
 
-            try:
-                validation_output = await self.validate_document(extraction_file)
-                results.append(validation_output)
+        # Process all documents in parallel with worker limit
+        print(f"\n🚀 Starting parallel API validation...")
+        tasks = [
+            self._validate_document_with_save(extraction_file, semaphore, progress)
+            for extraction_file in extraction_files
+        ]
 
-                # Save validation output
-                output_file = self.output_folder / f"{extraction_file.stem}_validation.json"
-                with open(output_file, 'w', encoding='utf-8') as f:
-                    f.write(validation_output.model_dump_json(indent=2))
+        results = await asyncio.gather(*tasks)
 
-                print(f"   💾 Saved to {output_file}")
+        # Filter out None results (failed validations)
+        results = [r for r in results if r is not None]
 
-            except Exception as e:
-                print(f"   ❌ Error processing {extraction_file.name}: {e}")
-                import traceback
-                traceback.print_exc()
+        # Calculate validation duration
+        validation_end_time = datetime.now()
+        validation_duration_seconds = (validation_end_time - validation_start_time).total_seconds()
 
         # Create overall summary
         print(f"\n{'='*80}")
@@ -685,8 +722,9 @@ class APISignatureValidationAgent:
         print(f"✅ Valid: {sum(r.summary.valid for r in results)}")
         print(f"⚠️  Invalid: {sum(r.summary.invalid for r in results)}")
         print(f"❌ Not found: {sum(r.summary.not_found for r in results)}")
+        print(f"⏱️  Validation duration: {validation_duration_seconds:.2f}s")
 
-        # Save overall summary
+        # Save overall summary with timing
         overall_summary = {
             "validation_timestamp": datetime.now().isoformat(),
             "total_documents": len(results),
@@ -696,6 +734,8 @@ class APISignatureValidationAgent:
             "total_not_found": sum(r.summary.not_found for r in results),
             "total_critical_issues": sum(r.summary.critical_issues for r in results),
             "total_warnings": sum(r.summary.warnings for r in results),
+            "validation_duration_seconds": round(validation_duration_seconds, 2),
+            "num_workers": self.num_workers,
             "documents": [
                 {
                     "source_file": r.source_file,
@@ -716,6 +756,8 @@ class APISignatureValidationAgent:
             json.dump(overall_summary, f, indent=2)
 
         print(f"💾 Summary saved to {summary_file}")
+
+        return overall_summary
 
 
 # This module is designed to be used as a library.
