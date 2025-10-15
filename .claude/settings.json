@@ -1,0 +1,34 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/validate_extraction_json.py"
+          },
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/validate_validation_json.py"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR\"/.claude/hooks/validate_output_directory.py"
+          }
+        ]
+      }
+    ]
+  },
+  "env": {
+    "EXTRACTION_OUTPUT_DIR": "/Users/arshath/play/naptha/stackbench-v2/cc-agents/extraction_output",
+    "VALIDATION_OUTPUT_DIR": "/Users/arshath/play/naptha/stackbench-v2/cc-agents/validation_output"
+  }
+}
