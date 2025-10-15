@@ -385,16 +385,17 @@ class DocumentationExtractionAgent:
 
         warnings = []
 
-        # Create per-document logger
+        # Create per-document logger with new directory structure
         from stackbench.hooks import create_agent_hooks, AgentLogger
 
         if self.validation_log_dir:
             doc_stem = doc_path.stem
-            doc_logs_dir = self.validation_log_dir / doc_stem
-            doc_logs_dir.mkdir(parents=True, exist_ok=True)
+            # New structure: logs/extraction_logs/<doc_name>/
+            extraction_logs_dir = self.validation_log_dir / "extraction_logs" / doc_stem
+            extraction_logs_dir.mkdir(parents=True, exist_ok=True)
 
-            agent_log = doc_logs_dir / "agent.log"
-            tools_log = doc_logs_dir / "tools.jsonl"
+            agent_log = extraction_logs_dir / "agent.log"
+            tools_log = extraction_logs_dir / "tools.jsonl"
             logger = AgentLogger(agent_log, tools_log)
         else:
             logger = None

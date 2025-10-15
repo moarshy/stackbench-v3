@@ -318,36 +318,11 @@ class APISignatureValidationAgent:
 
         print(f"👷 API Validation Workers: {self.num_workers}")
 
-        # Import hooks
-        from stackbench.hooks import create_agent_hooks, AgentLogger
-
-        # Create logger for tool/message logging
+        # Note: We don't create a global logger here anymore - we create one per document
+        # This allows us to have separate log files for each document
         if self.validation_log_dir:
-            agent_log = self.validation_log_dir / "api_validation_agent.log"
-            tools_log = self.validation_log_dir / "api_validation_tools.jsonl"
-            logger = AgentLogger(agent_log, tools_log)
-            print(f"📋 Logging enabled:")
-            print(f"   Agent log: {agent_log}")
-            print(f"   Tools log: {tools_log}")
-        else:
-            logger = None
-
-        # Create hooks (validation + logging)
-        hooks = create_agent_hooks(
-            agent_type="api_validation",
-            logger=logger,  # Enable logging
-            output_dir=self.output_folder,
-            validation_log_dir=self.validation_log_dir
-        )
-
-        # Configure Claude options with programmatic hooks
-        self.options = ClaudeAgentOptions(
-            system_prompt=VALIDATION_SYSTEM_PROMPT,
-            allowed_tools=["Read", "Write", "Bash"],
-            permission_mode="acceptEdits",
-            hooks=hooks,  # Use programmatic hooks instead of settings
-            cwd=str(Path.cwd())
-        )
+            print(f"📋 Per-document logging enabled")
+            print(f"   Logs will be saved to: {self.validation_log_dir}/api_signature_logs/")
 
     def extract_json_from_response(self, response_text: str) -> Optional[Dict[str, Any]]:
         """Extract JSON from Claude's response, handling markdown code blocks and explanatory text."""
@@ -470,6 +445,38 @@ class APISignatureValidationAgent:
 
         warnings = []
 
+        # Create per-document logger with new directory structure
+        from stackbench.hooks import create_agent_hooks, AgentLogger
+
+        if self.validation_log_dir:
+            doc_stem = extraction_file.stem.replace('_analysis', '')
+            # New structure: logs/api_signature_logs/<doc_name>/
+            api_logs_dir = self.validation_log_dir / "api_signature_logs" / doc_stem
+            api_logs_dir.mkdir(parents=True, exist_ok=True)
+
+            agent_log = api_logs_dir / "agent.log"
+            tools_log = api_logs_dir / "tools.jsonl"
+            logger = AgentLogger(agent_log, tools_log)
+        else:
+            logger = None
+
+        # Create hooks for this document
+        hooks = create_agent_hooks(
+            agent_type="api_validation",
+            logger=logger,
+            output_dir=self.output_folder,
+            validation_log_dir=self.validation_log_dir
+        )
+
+        # Create options with per-document hooks
+        options = ClaudeAgentOptions(
+            system_prompt=VALIDATION_SYSTEM_PROMPT,
+            allowed_tools=["Read", "Write", "Bash"],
+            permission_mode="acceptEdits",
+            hooks=hooks,
+            cwd=str(Path.cwd())
+        )
+
         if not signatures:
             # Return empty result
             processing_time = int((datetime.now() - start_time).total_seconds() * 1000)
@@ -504,7 +511,7 @@ class APISignatureValidationAgent:
             )
 
         # Ask Claude to validate all signatures
-        async with ClaudeSDKClient(options=self.options) as client:
+        async with ClaudeSDKClient(options=options) as client:
             signatures_json = self.format_signatures_for_prompt(signatures)
             prompt = VALIDATION_PROMPT.format(
                 library=library,

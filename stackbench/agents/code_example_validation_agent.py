@@ -133,36 +133,11 @@ class ValidationAgent:
 
         print(f"👷 Code Validation Workers: {self.num_workers}")
 
-        # Import hooks
-        from stackbench.hooks import create_agent_hooks, AgentLogger
-
-        # Create logger for tool/message logging
+        # Note: We don't create a global logger here anymore - we create one per document
+        # This allows us to have separate log files for each document
         if self.validation_log_dir:
-            agent_log = self.validation_log_dir / "code_validation_agent.log"
-            tools_log = self.validation_log_dir / "code_validation_tools.jsonl"
-            logger = AgentLogger(agent_log, tools_log)
-            print(f"📋 Logging enabled:")
-            print(f"   Agent log: {agent_log}")
-            print(f"   Tools log: {tools_log}")
-        else:
-            logger = None
-
-        # Create hooks (validation + logging)
-        hooks = create_agent_hooks(
-            agent_type="code_validation",
-            logger=logger,  # Enable logging
-            output_dir=self.validation_output_folder,
-            validation_log_dir=self.validation_log_dir
-        )
-
-        # Configure Claude options with programmatic hooks
-        self.options = ClaudeAgentOptions(
-            system_prompt=VALIDATION_SYSTEM_PROMPT,
-            allowed_tools=["Bash", "Write", "Read"],
-            permission_mode="acceptEdits",
-            hooks=hooks,  # Use programmatic hooks instead of settings
-            cwd=str(Path.cwd())
-        )
+            print(f"📋 Per-document logging enabled")
+            print(f"   Logs will be saved to: {self.validation_log_dir}/code_example_logs/")
 
     def format_examples_for_prompt(self, examples: List[Dict]) -> str:
         """Format examples as JSON for the prompt."""
@@ -225,6 +200,38 @@ class ValidationAgent:
         language = data["language"]
         examples = data.get("examples", [])
 
+        # Create per-document logger with new directory structure
+        from stackbench.hooks import create_agent_hooks, AgentLogger
+
+        if self.validation_log_dir:
+            doc_stem = extraction_file.stem.replace('_analysis', '')
+            # New structure: logs/code_example_logs/<doc_name>/
+            code_logs_dir = self.validation_log_dir / "code_example_logs" / doc_stem
+            code_logs_dir.mkdir(parents=True, exist_ok=True)
+
+            agent_log = code_logs_dir / "agent.log"
+            tools_log = code_logs_dir / "tools.jsonl"
+            logger = AgentLogger(agent_log, tools_log)
+        else:
+            logger = None
+
+        # Create hooks for this document
+        hooks = create_agent_hooks(
+            agent_type="code_validation",
+            logger=logger,
+            output_dir=self.validation_output_folder,
+            validation_log_dir=self.validation_log_dir
+        )
+
+        # Create options with per-document hooks
+        options = ClaudeAgentOptions(
+            system_prompt=VALIDATION_SYSTEM_PROMPT,
+            allowed_tools=["Bash", "Write", "Read"],
+            permission_mode="acceptEdits",
+            hooks=hooks,
+            cwd=str(Path.cwd())
+        )
+
         if not examples:
             return DocumentValidationResult(
                 page=page,
@@ -240,7 +247,7 @@ class ValidationAgent:
             )
 
         # Ask Claude to validate
-        async with ClaudeSDKClient(options=self.options) as client:
+        async with ClaudeSDKClient(options=options) as client:
             examples_json = self.format_examples_for_prompt(examples)
             prompt = VALIDATE_EXAMPLES_PROMPT.format(
                 library=library,

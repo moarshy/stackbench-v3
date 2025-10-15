@@ -171,15 +171,70 @@ def create_logging_hooks(logger: AgentLogger):
             tool_input = input_data.get('tool_input', {})
             tool_output = input_data.get('tool_output', {})
 
-            # Log to agent log
-            logger.log_message(f"POST-TOOL: {tool_name}", level="DEBUG")
-
-            # Check for errors
+            # Check for errors first
             error = None
             if isinstance(tool_output, dict):
                 if tool_output.get('is_error'):
                     error = str(tool_output.get('content', 'Unknown error'))
-                    logger.log_message(f"Tool error in {tool_name}: {error}", level="ERROR")
+
+            # Create detailed log message with output information
+            details = []
+            if error:
+                details.append(f"error='{error[:100]}'")  # First 100 chars of error
+            elif tool_name == "Read":
+                file_path = tool_input.get('file_path', 'unknown')
+                if isinstance(tool_output, dict):
+                    content = tool_output.get('content', '')
+                    if isinstance(content, str):
+                        lines = content.count('\n') + 1 if content else 0
+                        bytes_read = len(content)
+                        details.append(f"file={file_path}, lines={lines}, bytes={bytes_read}")
+                    else:
+                        details.append(f"file={file_path}")
+                else:
+                    details.append(f"file={file_path}")
+            elif tool_name == "Write":
+                file_path = tool_input.get('file_path', 'unknown')
+                content_len = len(tool_input.get('content', ''))
+                details.append(f"file={file_path}, bytes_written={content_len}")
+            elif tool_name == "Bash":
+                if isinstance(tool_output, dict):
+                    content = tool_output.get('content', '')
+                    exit_code = tool_output.get('exit_code', 'unknown')
+                    output_len = len(str(content))
+                    details.append(f"exit_code={exit_code}, output_bytes={output_len}")
+                else:
+                    details.append("completed")
+            elif tool_name == "Glob":
+                if isinstance(tool_output, dict):
+                    content = tool_output.get('content', '')
+                    if isinstance(content, str):
+                        matches = len(content.splitlines()) if content else 0
+                        details.append(f"matches={matches}")
+                    else:
+                        details.append("completed")
+                else:
+                    details.append("completed")
+            elif tool_name == "Grep":
+                if isinstance(tool_output, dict):
+                    content = tool_output.get('content', '')
+                    if isinstance(content, str):
+                        matches = len(content.splitlines()) if content else 0
+                        details.append(f"matches={matches}")
+                    else:
+                        details.append("completed")
+                else:
+                    details.append("completed")
+            else:
+                details.append("completed")
+
+            detail_str = ", ".join(details) if details else "no output"
+
+            # Log to agent log with details
+            if error:
+                logger.log_message(f"POST-TOOL: {tool_name} ({detail_str})", level="ERROR")
+            else:
+                logger.log_message(f"POST-TOOL: {tool_name} ({detail_str})", level="DEBUG")
 
             # Log to tools JSONL
             entry = ToolLogEntry(
