@@ -22,8 +22,8 @@ from claude_agent_sdk import (
     TextBlock,
 )
 
-from dotenv import load_dotenv
-load_dotenv()
+from dotenv import load_dotenv, find_dotenv
+load_dotenv(find_dotenv())
 
 
 # ============================================================================
