@@ -43,6 +43,8 @@ class RunContext:
         self.status = "initializing"
         self.num_workers: Optional[int] = None
         self.extraction_duration_seconds: Optional[float] = None
+        self.api_validation_duration_seconds: Optional[float] = None
+        self.code_validation_duration_seconds: Optional[float] = None
 
     @classmethod
     def create(
@@ -82,6 +84,8 @@ class RunContext:
             "status": self.status,
             "num_workers": self.num_workers,
             "extraction_duration_seconds": self.extraction_duration_seconds,
+            "api_validation_duration_seconds": self.api_validation_duration_seconds,
+            "code_validation_duration_seconds": self.code_validation_duration_seconds,
         }
 
         metadata_file = self.run_dir / "metadata.json"
@@ -125,6 +129,8 @@ class RunContext:
         context.status = metadata["status"]
         context.num_workers = metadata.get("num_workers")
         context.extraction_duration_seconds = metadata.get("extraction_duration_seconds")
+        context.api_validation_duration_seconds = metadata.get("api_validation_duration_seconds")
+        context.code_validation_duration_seconds = metadata.get("code_validation_duration_seconds")
 
         return context
 

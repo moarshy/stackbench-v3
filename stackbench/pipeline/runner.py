@@ -169,6 +169,11 @@ class DocumentationValidationPipeline:
 
         api_summary = await agent.validate_all_documents()
 
+        # Save API validation duration to run context
+        if api_summary and 'validation_duration_seconds' in api_summary:
+            self.run_context.api_validation_duration_seconds = api_summary['validation_duration_seconds']
+            self.run_context.save_metadata()
+
         # Load and return summary
         summary_file = validation_output / "validation_summary.json"
         if summary_file.exists():
@@ -211,6 +216,11 @@ class DocumentationValidationPipeline:
         )
 
         summary = await agent.validate_all_documents()
+
+        # Save code validation duration to run context
+        if summary and 'validation_duration_seconds' in summary:
+            self.run_context.code_validation_duration_seconds = summary['validation_duration_seconds']
+            self.run_context.save_metadata()
 
         print(f"✅ Code validation complete:")
         print(f"   Successful: {summary['successful']}")
