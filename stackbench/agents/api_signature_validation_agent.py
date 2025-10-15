@@ -294,7 +294,13 @@ Return JSON:
 class APISignatureValidationAgent:
     """Agent that validates API signatures using Claude Code and Python introspection."""
 
-    def __init__(self, extraction_folder: Path, output_folder: Path, num_workers: int = 5):
+    def __init__(
+        self,
+        extraction_folder: Path,
+        output_folder: Path,
+        num_workers: int = 5,
+        validation_log_dir: Optional[Path] = None
+    ):
         """
         Initialize the validation agent.
 
@@ -302,20 +308,44 @@ class APISignatureValidationAgent:
             extraction_folder: Path to extraction output folder
             output_folder: Path to save validation results
             num_workers: Number of parallel workers for validation (default: 5)
+            validation_log_dir: Optional directory for validation hook tracking logs
         """
         self.extraction_folder = Path(extraction_folder)
         self.output_folder = Path(output_folder)
         self.output_folder.mkdir(parents=True, exist_ok=True)
         self.num_workers = num_workers
+        self.validation_log_dir = Path(validation_log_dir) if validation_log_dir else None
 
         print(f"👷 API Validation Workers: {self.num_workers}")
 
-        # Configure Claude options
+        # Import hooks
+        from stackbench.hooks import create_agent_hooks, AgentLogger
+
+        # Create logger for tool/message logging
+        if self.validation_log_dir:
+            agent_log = self.validation_log_dir / "api_validation_agent.log"
+            tools_log = self.validation_log_dir / "api_validation_tools.jsonl"
+            logger = AgentLogger(agent_log, tools_log)
+            print(f"📋 Logging enabled:")
+            print(f"   Agent log: {agent_log}")
+            print(f"   Tools log: {tools_log}")
+        else:
+            logger = None
+
+        # Create hooks (validation + logging)
+        hooks = create_agent_hooks(
+            agent_type="api_validation",
+            logger=logger,  # Enable logging
+            output_dir=self.output_folder,
+            validation_log_dir=self.validation_log_dir
+        )
+
+        # Configure Claude options with programmatic hooks
         self.options = ClaudeAgentOptions(
             system_prompt=VALIDATION_SYSTEM_PROMPT,
             allowed_tools=["Read", "Write", "Bash"],
             permission_mode="acceptEdits",
-            setting_sources=["project"],
+            hooks=hooks,  # Use programmatic hooks instead of settings
             cwd=str(Path.cwd())
         )
 
@@ -636,8 +666,23 @@ class APISignatureValidationAgent:
             try:
                 validation_output = await self.validate_document(extraction_file)
 
+                # Validate JSON before saving
+                from stackbench.hooks import validate_validation_output_json
+
+                validation_dict = json.loads(validation_output.model_dump_json())
+                filename = f"{extraction_file.stem}_validation.json"
+
+                passed, errors = validate_validation_output_json(
+                    validation_dict,
+                    filename,
+                    self.validation_log_dir
+                )
+
+                if not passed:
+                    print(f"⚠️  [{progress['completed']+1}/{progress['total']}] {extraction_file.stem.replace('_analysis', '')} - Validation failed: {errors[:2]}")
+
                 # Save validation output
-                output_file = self.output_folder / f"{extraction_file.stem}_validation.json"
+                output_file = self.output_folder / filename
                 with open(output_file, 'w', encoding='utf-8') as f:
                     f.write(validation_output.model_dump_json(indent=2))
 

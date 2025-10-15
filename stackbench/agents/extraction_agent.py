@@ -220,7 +220,15 @@ class ExtractionSummary(BaseModel):
 class DocumentationExtractionAgent:
     """Agent that extracts API signatures and code examples from markdown docs."""
 
-    def __init__(self, docs_folder: Path, output_folder: Path, repo_root: Optional[Path] = None, default_version: str = "0.25.2", num_workers: int = 5):
+    def __init__(
+        self,
+        docs_folder: Path,
+        output_folder: Path,
+        repo_root: Optional[Path] = None,
+        default_version: str = "0.25.2",
+        num_workers: int = 5,
+        validation_log_dir: Optional[Path] = None
+    ):
         """
         Initialize the extraction agent.
 
@@ -231,12 +239,14 @@ class DocumentationExtractionAgent:
                       If None, will try to auto-detect from docs_folder
             default_version: Default library version to use if not found in docs (default: "0.25.2")
             num_workers: Number of parallel workers for extraction (default: 5)
+            validation_log_dir: Optional directory for validation hook tracking logs
         """
         self.docs_folder = Path(docs_folder)
         self.output_folder = Path(output_folder)
         self.output_folder.mkdir(parents=True, exist_ok=True)
         self.default_version = default_version
         self.num_workers = num_workers
+        self.validation_log_dir = Path(validation_log_dir) if validation_log_dir else None
 
         # Determine repo root
         if repo_root:
@@ -249,16 +259,11 @@ class DocumentationExtractionAgent:
         print(f"📦 Default version: {self.default_version}")
         print(f"👷 Workers: {self.num_workers}")
 
-        # Configure Claude options (compatible with both old and new CLI versions)
-        self.options = ClaudeAgentOptions(
-            system_prompt=EXTRACTION_SYSTEM_PROMPT,
-            allowed_tools=["Read", "Write"],
-            permission_mode="acceptEdits",
-            setting_sources=["project"],  # Load .claude/settings.json for validation hooks
-            cwd=str(Path.cwd())  # Set working directory for hook execution
-            # Note: model parameter requires Claude Code 2.0.0+
-            # Removed to maintain compatibility with older versions
-        )
+        # Note: We don't create a logger here anymore - we create one per document
+        # This allows us to have separate log files for each document
+        if self.validation_log_dir:
+            print(f"📋 Per-document logging enabled")
+            print(f"   Logs will be saved to: {self.validation_log_dir}")
 
     def _find_repo_root(self, start_path: Path) -> Path:
         """
@@ -380,7 +385,38 @@ class DocumentationExtractionAgent:
 
         warnings = []
 
-        async with ClaudeSDKClient(options=self.options) as client:
+        # Create per-document logger
+        from stackbench.hooks import create_agent_hooks, AgentLogger
+
+        if self.validation_log_dir:
+            doc_stem = doc_path.stem
+            doc_logs_dir = self.validation_log_dir / doc_stem
+            doc_logs_dir.mkdir(parents=True, exist_ok=True)
+
+            agent_log = doc_logs_dir / "agent.log"
+            tools_log = doc_logs_dir / "tools.jsonl"
+            logger = AgentLogger(agent_log, tools_log)
+        else:
+            logger = None
+
+        # Create hooks for this document
+        hooks = create_agent_hooks(
+            agent_type="extraction",
+            logger=logger,
+            output_dir=self.output_folder,
+            validation_log_dir=self.validation_log_dir
+        )
+
+        # Create options with per-document hooks
+        options = ClaudeAgentOptions(
+            system_prompt=EXTRACTION_SYSTEM_PROMPT,
+            allowed_tools=["Read", "Write"],
+            permission_mode="acceptEdits",
+            hooks=hooks,
+            cwd=str(Path.cwd())
+        )
+
+        async with ClaudeSDKClient(options=options) as client:
             # Single unified extraction call
             extraction_prompt = UNIFIED_EXTRACTION_PROMPT.format(
                 content=content,
@@ -469,8 +505,23 @@ class DocumentationExtractionAgent:
             try:
                 analysis = await self.analyze_document(doc_path, library_name)
 
+                # Validate JSON before saving
+                from stackbench.hooks import validate_extraction_json
+
+                analysis_dict = json.loads(analysis.model_dump_json())
+                filename = f"{doc_path.stem}_analysis.json"
+
+                passed, errors = validate_extraction_json(
+                    analysis_dict,
+                    filename,
+                    self.validation_log_dir
+                )
+
+                if not passed:
+                    print(f"⚠️  [{progress['completed']+1}/{progress['total']}] {doc_path.name} - Validation failed: {errors[:2]}")
+
                 # Save individual result
-                output_file = self.output_folder / f"{doc_path.stem}_analysis.json"
+                output_file = self.output_folder / filename
                 with open(output_file, 'w', encoding='utf-8') as f:
                     f.write(analysis.model_dump_json(indent=2))
 

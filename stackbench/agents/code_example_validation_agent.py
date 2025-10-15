@@ -118,18 +118,49 @@ IMPORTANT: Actually run the code using Bash tool. Create virtualenv, install pac
 class ValidationAgent:
     """Agent that validates code examples using Claude Code."""
 
-    def __init__(self, extraction_output_folder: Path, validation_output_folder: Path, num_workers: int = 5):
+    def __init__(
+        self,
+        extraction_output_folder: Path,
+        validation_output_folder: Path,
+        num_workers: int = 5,
+        validation_log_dir: Optional[Path] = None
+    ):
         self.extraction_output_folder = Path(extraction_output_folder)
         self.validation_output_folder = Path(validation_output_folder)
         self.validation_output_folder.mkdir(parents=True, exist_ok=True)
         self.num_workers = num_workers
+        self.validation_log_dir = Path(validation_log_dir) if validation_log_dir else None
 
         print(f"👷 Code Validation Workers: {self.num_workers}")
 
+        # Import hooks
+        from stackbench.hooks import create_agent_hooks, AgentLogger
+
+        # Create logger for tool/message logging
+        if self.validation_log_dir:
+            agent_log = self.validation_log_dir / "code_validation_agent.log"
+            tools_log = self.validation_log_dir / "code_validation_tools.jsonl"
+            logger = AgentLogger(agent_log, tools_log)
+            print(f"📋 Logging enabled:")
+            print(f"   Agent log: {agent_log}")
+            print(f"   Tools log: {tools_log}")
+        else:
+            logger = None
+
+        # Create hooks (validation + logging)
+        hooks = create_agent_hooks(
+            agent_type="code_validation",
+            logger=logger,  # Enable logging
+            output_dir=self.validation_output_folder,
+            validation_log_dir=self.validation_log_dir
+        )
+
+        # Configure Claude options with programmatic hooks
         self.options = ClaudeAgentOptions(
             system_prompt=VALIDATION_SYSTEM_PROMPT,
             allowed_tools=["Bash", "Write", "Read"],
             permission_mode="acceptEdits",
+            hooks=hooks,  # Use programmatic hooks instead of settings
             cwd=str(Path.cwd())
         )
 

@@ -106,6 +106,9 @@ class DocumentationValidationPipeline:
         (self.run_context.results_dir / "api_validation").mkdir(exist_ok=True)
         (self.run_context.results_dir / "code_validation").mkdir(exist_ok=True)
 
+        # Create validation tracking log directory
+        (self.run_context.run_dir / "validation_logs").mkdir(exist_ok=True)
+
         return self.run_context
 
     async def run_extraction(self) -> ExtractionSummary:
@@ -123,13 +126,15 @@ class DocumentationValidationPipeline:
         print(f"   Docs folder: {self.docs_folder}")
 
         extraction_output = self.run_context.results_dir / "extraction"
+        validation_log_dir = self.run_context.run_dir / "validation_logs"
 
         agent = DocumentationExtractionAgent(
             docs_folder=self.docs_folder,
             output_folder=extraction_output,
             repo_root=self.run_context.repo_dir,
             default_version=self.library_version,
-            num_workers=self.num_workers
+            num_workers=self.num_workers,
+            validation_log_dir=validation_log_dir
         )
 
         summary = await agent.process_all_documents(library_name=self.library_name)
@@ -160,11 +165,13 @@ class DocumentationValidationPipeline:
 
         extraction_output = self.run_context.results_dir / "extraction"
         validation_output = self.run_context.results_dir / "api_validation"
+        validation_log_dir = self.run_context.run_dir / "validation_logs"
 
         agent = APISignatureValidationAgent(
             extraction_folder=extraction_output,
             output_folder=validation_output,
-            num_workers=self.num_workers
+            num_workers=self.num_workers,
+            validation_log_dir=validation_log_dir
         )
 
         api_summary = await agent.validate_all_documents()
@@ -208,11 +215,13 @@ class DocumentationValidationPipeline:
 
         extraction_output = self.run_context.results_dir / "extraction"
         validation_output = self.run_context.results_dir / "code_validation"
+        validation_log_dir = self.run_context.run_dir / "validation_logs"
 
         agent = CodeExampleValidationAgent(
             extraction_output_folder=extraction_output,
             validation_output_folder=validation_output,
-            num_workers=self.num_workers
+            num_workers=self.num_workers,
+            validation_log_dir=validation_log_dir
         )
 
         summary = await agent.validate_all_documents()
