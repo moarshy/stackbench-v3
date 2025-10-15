@@ -71,55 +71,63 @@ DOCUMENT_ANALYSIS_SCHEMA = {
 
 VALIDATION_OUTPUT_SCHEMA = {
     "required_fields": [
-        "validation_id", "validated_at", "source_file", "library", "version",
-        "language", "summary", "validations", "environment", "processing", "warnings"
+        "validation_id", "validated_at", "source_file", "document_page", "library", "version",
+        "language", "summary", "validations", "environment", "processing_time_ms", "warnings"
     ],
     "optional_fields": [],
     "field_types": {
         "validation_id": str,
         "validated_at": str,
         "source_file": str,
+        "document_page": str,
         "library": str,
         "version": str,
         "language": str,
         "summary": dict,
         "validations": list,
         "environment": dict,
-        "processing": dict,
+        "processing_time_ms": int,
         "warnings": list
     },
     "nested_schemas": {
         "summary": {
-            "required_fields": ["total_signatures_checked", "valid", "invalid", "not_found", "accuracy_score"],
+            "required_fields": ["total_signatures", "valid", "invalid", "not_found", "error", "accuracy_score", "critical_issues", "warnings"],
             "field_types": {
-                "total_signatures_checked": int,
+                "total_signatures": int,
                 "valid": int,
                 "invalid": int,
                 "not_found": int,
-                "accuracy_score": float
+                "error": int,
+                "accuracy_score": float,
+                "critical_issues": int,
+                "warnings": int
             }
         },
         "environment": {
-            "required_fields": ["library_version_installed", "library_version_requested", "version_match", "installation_method", "python_version"],
+            "required_fields": ["library_installed", "version_installed", "version_requested", "version_match", "python_version"],
+            "optional_fields": ["installation_output"],
             "field_types": {
-                "library_version_installed": str,
-                "library_version_requested": str,
+                "library_installed": str,
+                "version_installed": str,
+                "version_requested": str,
                 "version_match": bool,
-                "installation_method": str,
-                "python_version": str
+                "python_version": str,
+                "installation_output": (str, type(None))
             }
         },
         "validations": {
-            "required_fields": ["signature_id", "function", "library", "status", "documented", "issues"],
-            "optional_fields": ["actual"],
+            "required_fields": ["signature_id", "function", "library", "status", "documented", "issues", "confidence"],
+            "optional_fields": ["method_chain", "actual"],
             "field_types": {
                 "signature_id": str,
                 "function": str,
+                "method_chain": (str, type(None)),
                 "library": str,
                 "status": str,
                 "documented": dict,
                 "actual": (dict, type(None)),
-                "issues": list
+                "issues": list,
+                "confidence": float
             }
         }
     }
