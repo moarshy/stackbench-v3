@@ -1,176 +1,65 @@
 # Stackbench
 
-**Documentation Quality Validation Tool**
+An AI-powered tool that validates documentation quality by checking if code examples work and API signatures match actual implementations.
 
-Stackbench is a command-line tool that validates the quality of software documentation by:
+## What It Does
 
-1. 📝 **Extracting API signatures** and code examples from documentation
-2. 🔍 **Validating API signatures** against actual library implementations  
-3. ✅ **Testing code examples** by executing them in isolated environments
+Stackbench uses Claude Code agents to automatically validate documentation through three core processes:
 
-## Features
+1. **Extraction** - Analyzes markdown documentation to extract API signatures and code examples
+2. **API Signature Validation** - Validates that documented function signatures match actual library implementations
+3. **Code Example Validation** - Tests that code examples actually run without errors
 
-- **Automated Validation**: Clone a repository, analyze documentation, and get comprehensive quality reports
-- **API Signature Accuracy**: Ensures documented function signatures match the actual library implementation
-- **Code Example Testing**: Verifies that code examples in documentation actually work
-- **Rich CLI**: Beautiful terminal output with progress bars and formatted results
-- **UUID-based Runs**: Each validation run gets a unique identifier for tracking
+Each process uses Claude Code with intelligent hooks that validate outputs and log execution details.
 
-## Installation
+## How to Run
 
-### Using UV (Recommended)
+### Python CLI
 
 ```bash
-# Clone the repository
-git clone <your-repo-url>
-cd stackbench-v3
-
-# Install dependencies with UV
+# Install dependencies
 uv sync
 
-# Run stackbench
-uv run stackbench --help
-```
-
-### Using pip
-
-```bash
-# Clone the repository
-git clone <your-repo-url>
-cd stackbench-v3
-
-# Install in development mode
-pip install -e .
-
-# Run stackbench
-stackbench --help
-```
-
-## Usage
-
-### Basic Example
-
-```bash
-stackbench run \
+# Run validation on a repository
+uv run stackbench run \
   --repo https://github.com/lancedb/lancedb \
   --branch main \
   --include-folders docs/src/python \
   --library lancedb \
   --version 0.25.2 \
-  --output ./validation-results
+  --num-workers 5
 ```
 
-### Command Options
+The `--num-workers` flag (default: 5) controls parallel processing during extraction - multiple documents are analyzed concurrently by Claude Code agents.
 
-- `--repo, -r`: Git repository URL (required)
-- `--branch, -b`: Git branch to clone (default: main)
-- `--include-folders, -i`: Comma-separated list of documentation folders to analyze
-- `--library, -l`: Primary library name being documented (required)
-- `--version, -v`: Library version to validate against (required)
-- `--output, -o`: Output directory (default: ./data)
+### Web Interface
 
-### Output Structure
+```bash
+# Navigate to frontend directory
+cd frontend
 
-Each validation run creates a unique directory structure:
+# Install dependencies
+bun install
 
-```
-data/
-└── {run-uuid}/
-    ├── repository/           # Cloned repository
-    ├── results/
-    │   ├── extraction/       # Extracted API signatures and examples
-    │   ├── api_validation/   # API signature validation results
-    │   └── code_validation/  # Code example validation results
-    └── metadata.json         # Run metadata
+# Start development server
+bun run dev
 ```
 
-## What It Validates
+The web UI will be available at `http://localhost:5173`
 
-### 1. API Signature Accuracy
+## Hooks System
 
-Checks if documented function signatures match the actual implementation:
+Stackbench uses programmatic Python hooks (via Claude Code) to ensure data quality:
 
-- ✅ All required parameters documented correctly
-- ✅ Parameter types match actual implementation
-- ✅ Default values are accurate
-- ℹ️  Optional parameters may be omitted from introductory docs (acceptable)
+- **Validation Hooks** - Block invalid JSON outputs before they're written
+- **Logging Hooks** - Capture all tool calls and results for debugging
 
-### 2. Code Example Validation
-
-Tests if code examples actually run:
-
-- ✅ Syntax is valid
-- ✅ Code executes without errors
-- ✅ Dependencies are properly specified
-- ✅ Examples work as documented
-
-## Example Output
-
-```
-📊 Extraction Results
-┏━━━━━━━━━━━━━━━━━━━━┳━━━━━━━┓
-┃ Metric             ┃ Count ┃
-┡━━━━━━━━━━━━━━━━━━━━╇━━━━━━━┩
-│ Documents          │    15 │
-│ API Signatures     │    42 │
-│ Code Examples      │    28 │
-└────────────────────┴───────┘
-
-🔍 API Signature Validation
-┏━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
-┃ Status   ┃ Count ┃ Percentage ┃
-┡━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
-│ Valid    │    40 │      95.2% │
-│ Invalid  │     2 │       4.8% │
-│ NotFound │     0 │       0.0% │
-└──────────┴───────┴────────────┘
-
-📝 Code Example Validation
-┏━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━┓
-┃ Status     ┃ Count ┃ Percentage ┃
-┡━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━┩
-│ Successful │    26 │      92.9% │
-│ Failed     │     2 │       7.1% │
-└────────────┴───────┴────────────┘
-```
+For details, see `stackbench/hooks/README.md`
 
 ## Requirements
 
 - Python 3.11+
-- UV or pip
-- Claude Code CLI (for agent execution)
-- Git
-
-## Development
-
-```bash
-# Install development dependencies
-uv sync --all-extras
-
-# Run tests
-uv run pytest
-
-# Format code
-uv run ruff format
-
-# Lint code
-uv run ruff check
-```
-
-## Architecture
-
-Stackbench uses a pipeline architecture with three specialized agents:
-
-1. **Extraction Agent**: Analyzes markdown documentation to extract API signatures and code examples
-2. **API Validation Agent**: Uses Python introspection to compare documented vs. actual signatures
-3. **Code Validation Agent**: Executes code examples in isolated environments to verify they work
-
-All agents use Claude Code for intelligent analysis and validation.
-
-## License
-
-[Your License Here]
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
+- Node.js 20+ (for frontend)
+- UV (Python package manager)
+- Bun or npm (for frontend)
+- Claude Code CLI (for AI agent execution)
