@@ -403,8 +403,24 @@ class ValidationAgent:
             skipped=skipped
         )
 
+        # Validate JSON before saving
+        from stackbench.hooks import validate_validation_output_json
+
+        validation_dict = json.loads(doc_result.model_dump_json())
+        filename = f"{Path(page).stem}_validation.json"
+
+        passed, errors = validate_validation_output_json(
+            validation_dict,
+            filename,
+            self.validation_log_dir,
+            validation_type="code_example_validation"
+        )
+
+        if not passed:
+            print(f"⚠️  {filename} - Validation failed: {errors[:2] if errors else 'Unknown error'}")
+
         # Save result
-        output_file = self.validation_output_folder / f"{Path(page).stem}_validation.json"
+        output_file = self.validation_output_folder / filename
         with open(output_file, 'w') as f:
             f.write(doc_result.model_dump_json(indent=2))
 

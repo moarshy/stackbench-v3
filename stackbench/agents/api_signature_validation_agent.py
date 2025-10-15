@@ -721,7 +721,8 @@ class APISignatureValidationAgent:
                 passed, errors = validate_validation_output_json(
                     validation_dict,
                     filename,
-                    self.validation_log_dir
+                    self.validation_log_dir,
+                    validation_type="api_signature_validation"
                 )
 
                 if not passed:

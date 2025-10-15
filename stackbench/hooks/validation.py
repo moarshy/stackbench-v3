@@ -69,7 +69,7 @@ DOCUMENT_ANALYSIS_SCHEMA = {
     }
 }
 
-VALIDATION_OUTPUT_SCHEMA = {
+API_SIGNATURE_VALIDATION_SCHEMA = {
     "required_fields": [
         "validation_id", "validated_at", "source_file", "document_page", "library", "version",
         "language", "summary", "validations", "environment", "processing_time_ms", "warnings"
@@ -128,6 +128,43 @@ VALIDATION_OUTPUT_SCHEMA = {
                 "actual": (dict, type(None)),
                 "issues": list,
                 "confidence": float
+            }
+        }
+    }
+}
+
+CODE_EXAMPLE_VALIDATION_SCHEMA = {
+    "required_fields": [
+        "page", "library", "version", "language", "validation_timestamp",
+        "results", "total_examples", "successful", "failed", "skipped"
+    ],
+    "optional_fields": [],
+    "field_types": {
+        "page": str,
+        "library": str,
+        "version": str,
+        "language": str,
+        "validation_timestamp": str,
+        "results": list,
+        "total_examples": int,
+        "successful": int,
+        "failed": int,
+        "skipped": int
+    },
+    "nested_schemas": {
+        "results": {
+            "required_fields": ["example_index", "line", "context", "code", "status", "depends_on_previous"],
+            "optional_fields": ["error_message", "suggestions", "execution_output"],
+            "field_types": {
+                "example_index": int,
+                "line": int,
+                "context": str,
+                "code": str,
+                "status": str,
+                "error_message": (str, type(None)),
+                "suggestions": (str, type(None)),
+                "execution_output": (str, type(None)),
+                "depends_on_previous": bool
             }
         }
     }
@@ -347,7 +384,8 @@ def validate_extraction_json(
 def validate_validation_output_json(
     data: dict,
     filename: str,
-    log_dir: Optional[Path] = None
+    log_dir: Optional[Path] = None,
+    validation_type: str = "validation_output"
 ) -> tuple[bool, Optional[List[str]]]:
     """
     Validate API/code validation JSON data directly (not via hook).
@@ -356,12 +394,22 @@ def validate_validation_output_json(
         data: The JSON data to validate
         filename: Name of the file being validated
         log_dir: Optional directory to log validation calls
+        validation_type: Type of validation (api_signature_validation or code_example_validation)
 
     Returns:
         Tuple of (passed, errors) where passed is bool and errors is list of error messages
     """
+    # Select appropriate schema based on validation type
+    if validation_type == "api_signature_validation":
+        schema = API_SIGNATURE_VALIDATION_SCHEMA
+    elif validation_type == "code_example_validation":
+        schema = CODE_EXAMPLE_VALIDATION_SCHEMA
+    else:
+        # Default to API schema for backward compatibility
+        schema = API_SIGNATURE_VALIDATION_SCHEMA
+
     # Validate structure
-    errors = validate_json_structure(data, VALIDATION_OUTPUT_SCHEMA)
+    errors = validate_json_structure(data, schema)
 
     passed = len(errors) == 0
 
@@ -369,7 +417,7 @@ def validate_validation_output_json(
     if log_dir:
         log_validation_call(
             log_dir,
-            "validation_output",
+            validation_type,
             filename,
             passed,
             errors=errors if errors else None,

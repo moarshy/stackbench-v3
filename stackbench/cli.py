@@ -166,6 +166,10 @@ async def _run_pipeline(
         code_validation_summary = await pipeline.run_code_validation()
         progress.advance(task)
 
+        # Mark pipeline as completed
+        if pipeline.run_context:
+            pipeline.run_context.mark_analysis_completed()
+
     # Display results
     console.print("\n")
     console.print(Panel.fit(
