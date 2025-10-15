@@ -297,8 +297,31 @@ class ValidationAgent:
 
         return doc_result
 
+    async def _validate_document_with_save(
+        self,
+        extraction_file: Path,
+        semaphore: asyncio.Semaphore,
+        progress: Dict[str, int]
+    ) -> Optional[DocumentValidationResult]:
+        """Validate a single document with semaphore control (already saves internally)."""
+        async with semaphore:
+            try:
+                result = await self.validate_document(extraction_file)
+                progress['completed'] += 1
+                print(f"   ✅ [{progress['completed']}/{progress['total']}] Completed {extraction_file.name}")
+                return result
+            except Exception as e:
+                progress['completed'] += 1
+                print(f"   ❌ [{progress['completed']}/{progress['total']}] Error validating {extraction_file.name}: {e}")
+                import traceback
+                traceback.print_exc()
+                return None
+
     async def validate_all_documents(self) -> Dict[str, Any]:
-        """Validate all extraction files."""
+        """Validate all extraction files using parallel workers."""
+        # Track overall validation time
+        validation_start_time = datetime.now()
+
         extraction_files = list(self.extraction_output_folder.glob("*_analysis.json"))
 
         # Filter out summary file
@@ -307,16 +330,29 @@ class ValidationAgent:
         print(f"\n{'='*80}")
         print(f"🚀 Starting validation for {len(extraction_files)} documents")
         print(f"{'='*80}")
+        print(f"👷 Using {self.num_workers} parallel workers")
 
-        results = []
-        for extraction_file in extraction_files:
-            try:
-                result = await self.validate_document(extraction_file)
-                results.append(result)
-            except Exception as e:
-                print(f"❌ Error validating {extraction_file.name}: {e}")
-                import traceback
-                traceback.print_exc()
+        # Create semaphore to limit concurrent workers
+        semaphore = asyncio.Semaphore(self.num_workers)
+
+        # Progress tracking
+        progress = {'completed': 0, 'total': len(extraction_files)}
+
+        # Process all documents in parallel with worker limit
+        print(f"\n🚀 Starting parallel code validation...")
+        tasks = [
+            self._validate_document_with_save(extraction_file, semaphore, progress)
+            for extraction_file in extraction_files
+        ]
+
+        results = await asyncio.gather(*tasks)
+
+        # Filter out None results (failed validations)
+        results = [r for r in results if r is not None]
+
+        # Calculate validation duration
+        validation_end_time = datetime.now()
+        validation_duration_seconds = (validation_end_time - validation_start_time).total_seconds()
 
         # Overall summary
         total_examples = sum(r.total_examples for r in results)
@@ -330,14 +366,17 @@ class ValidationAgent:
         print(f"📝 Total examples: {total_examples}")
         print(f"✅ Successful: {total_successful}")
         print(f"❌ Failed: {total_failed}")
+        print(f"⏱️  Validation duration: {validation_duration_seconds:.2f}s")
 
-        # Save summary
+        # Save summary with timing
         summary = {
             "timestamp": datetime.now().isoformat(),
             "total_documents": len(results),
             "total_examples": total_examples,
             "successful": total_successful,
             "failed": total_failed,
+            "validation_duration_seconds": round(validation_duration_seconds, 2),
+            "num_workers": self.num_workers,
             "documents": [
                 {
                     "page": r.page,
