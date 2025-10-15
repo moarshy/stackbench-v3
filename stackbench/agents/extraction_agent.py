@@ -368,10 +368,6 @@ class DocumentationExtractionAgent:
         Returns:
             DocumentAnalysis containing extracted signatures and examples
         """
-        print(f"\n{'='*80}")
-        print(f"📄 Processing: {doc_path.name}")
-        print(f"{'='*80}")
-
         start_time = datetime.now()
 
         # Read document content
@@ -382,13 +378,10 @@ class DocumentationExtractionAgent:
         if not library_name:
             library_name = self._detect_library_name(doc_path)
 
-        print(f"🎯 Target library: {library_name}")
-
         warnings = []
 
         async with ClaudeSDKClient(options=self.options) as client:
             # Single unified extraction call
-            print("\n🔍 Extracting all information (signatures + examples + metadata)...")
             extraction_prompt = UNIFIED_EXTRACTION_PROMPT.format(
                 content=content,
                 doc_path=str(doc_path),
@@ -396,10 +389,10 @@ class DocumentationExtractionAgent:
                 library_name=library_name
             )
             response_text = await self.get_claude_response(client, extraction_prompt)
-            
+
             # Parse response
             extracted_data = self.extract_json_from_response(response_text)
-            
+
             if not extracted_data:
                 warnings.append("Failed to parse extraction response")
                 # Return minimal result
@@ -417,19 +410,13 @@ class DocumentationExtractionAgent:
                     warnings=warnings,
                     processing_time_ms=processing_time
                 )
-            
+
             # Parse into Pydantic models
             try:
                 extraction_result = ExtractionResult(**extracted_data)
 
                 # Use default version if not extracted from docs
                 version = extraction_result.version or self.default_version
-
-                print(f"   ✅ Library: {extraction_result.library}")
-                print(f"   ✅ Version: {version}{' (default)' if not extraction_result.version else ''}")
-                print(f"   ✅ Language: {extraction_result.language}")
-                print(f"   ✅ Signatures: {len(extraction_result.signatures)}")
-                print(f"   ✅ Examples: {len(extraction_result.examples)}")
 
                 # Create analysis result
                 processing_time = int((datetime.now() - start_time).total_seconds() * 1000)
@@ -488,15 +475,15 @@ class DocumentationExtractionAgent:
                     f.write(analysis.model_dump_json(indent=2))
 
                 progress['completed'] += 1
-                print(f"   💾 [{progress['completed']}/{progress['total']}] Saved {doc_path.name}")
+                sigs = analysis.total_signatures
+                exs = analysis.total_examples
+                print(f"✅ [{progress['completed']}/{progress['total']}] {doc_path.name} - {sigs} signatures, {exs} examples")
 
                 return analysis
 
             except Exception as e:
                 progress['completed'] += 1
-                print(f"   ❌ [{progress['completed']}/{progress['total']}] Error processing {doc_path.name}: {e}")
-                import traceback
-                traceback.print_exc()
+                print(f"❌ [{progress['completed']}/{progress['total']}] {doc_path.name} - {e}")
                 return None
 
     async def process_all_documents(self, library_name: Optional[str] = None) -> ExtractionSummary:
@@ -526,11 +513,9 @@ class DocumentationExtractionAgent:
                 documents=[]
             )
 
-        print(f"\n📚 Found {len(md_files)} markdown files to process")
-        print(f"📁 Output folder: {self.output_folder}")
-        print(f"👷 Using {self.num_workers} parallel workers")
+        print(f"\n📚 Extracting from {len(md_files)} documents ({self.num_workers} workers)")
         if library_name:
-            print(f"🎯 Primary library: {library_name}")
+            print(f"🎯 Library: {library_name}")
 
         # Create semaphore to limit concurrent workers
         semaphore = asyncio.Semaphore(self.num_workers)
@@ -539,7 +524,6 @@ class DocumentationExtractionAgent:
         progress = {'completed': 0, 'total': len(md_files)}
 
         # Process all documents in parallel with worker limit
-        print(f"\n🚀 Starting parallel extraction...")
         tasks = [
             self._process_document_with_save(doc_path, library_name, semaphore, progress)
             for doc_path in md_files
@@ -571,15 +555,7 @@ class DocumentationExtractionAgent:
         with open(summary_file, 'w', encoding='utf-8') as f:
             f.write(summary.model_dump_json(indent=2))
 
-        print(f"\n{'='*80}")
-        print(f"✨ EXTRACTION COMPLETE")
-        print(f"{'='*80}")
-        print(f"📊 Total documents: {summary.total_documents}")
-        print(f"✅ Successfully processed: {summary.processed}")
-        print(f"🔧 Total signatures extracted: {summary.total_signatures}")
-        print(f"📝 Total examples extracted: {summary.total_examples}")
-        print(f"⏱️  Extraction duration: {extraction_duration_seconds:.2f}s")
-        print(f"💾 Summary saved to: {summary_file}")
+        print(f"\n✨ Extraction complete: {summary.processed}/{summary.total_documents} docs, {summary.total_signatures} signatures, {summary.total_examples} examples ({extraction_duration_seconds:.1f}s)")
 
         return summary
 

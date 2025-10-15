@@ -184,10 +184,6 @@ class ValidationAgent:
 
     async def validate_document(self, extraction_file: Path) -> DocumentValidationResult:
         """Validate all examples in a document."""
-        print(f"\n{'='*80}")
-        print(f"📄 Validating: {extraction_file.name}")
-        print(f"{'='*80}")
-
         # Load extraction data
         with open(extraction_file, 'r') as f:
             data = json.load(f)
@@ -198,11 +194,7 @@ class ValidationAgent:
         language = data["language"]
         examples = data.get("examples", [])
 
-        print(f"📚 Library: {library} v{version}")
-        print(f"📝 Examples: {len(examples)}")
-
         if not examples:
-            print("⚠️  No examples to validate")
             return DocumentValidationResult(
                 page=page,
                 library=library,
@@ -218,8 +210,6 @@ class ValidationAgent:
 
         # Ask Claude to validate
         async with ClaudeSDKClient(options=self.options) as client:
-            print("\n🔍 Asking Claude to validate examples...")
-
             examples_json = self.format_examples_for_prompt(examples)
             prompt = VALIDATE_EXAMPLES_PROMPT.format(
                 library=library,
@@ -234,7 +224,6 @@ class ValidationAgent:
             validation_results = self.extract_json_from_response(response_text)
 
             if not validation_results:
-                print("❌ Failed to get validation results from Claude")
                 # Create skipped results
                 validation_results = [
                     {
@@ -269,11 +258,6 @@ class ValidationAgent:
         failed = sum(1 for r in results if r.status == "failure")
         skipped = sum(1 for r in results if r.status == "skipped")
 
-        print(f"\n✅ Validation complete!")
-        print(f"   Success: {successful}/{len(examples)}")
-        print(f"   Failed: {failed}/{len(examples)}")
-        print(f"   Skipped: {skipped}/{len(examples)}")
-
         # Create result
         doc_result = DocumentValidationResult(
             page=page,
@@ -293,8 +277,6 @@ class ValidationAgent:
         with open(output_file, 'w') as f:
             f.write(doc_result.model_dump_json(indent=2))
 
-        print(f"💾 Saved to {output_file}")
-
         return doc_result
 
     async def _validate_document_with_save(
@@ -308,11 +290,15 @@ class ValidationAgent:
             try:
                 result = await self.validate_document(extraction_file)
                 progress['completed'] += 1
-                print(f"   ✅ [{progress['completed']}/{progress['total']}] Completed {extraction_file.name}")
+                # Show meaningful stats: success/failed/skipped
+                s = result.successful
+                f = result.failed
+                sk = result.skipped
+                print(f"✅ [{progress['completed']}/{progress['total']}] {extraction_file.stem.replace('_analysis', '')} - {s} success, {f} failed, {sk} skipped")
                 return result
             except Exception as e:
                 progress['completed'] += 1
-                print(f"   ❌ [{progress['completed']}/{progress['total']}] Error validating {extraction_file.name}: {e}")
+                print(f"❌ [{progress['completed']}/{progress['total']}] Error: {extraction_file.stem.replace('_analysis', '')} - {e}")
                 import traceback
                 traceback.print_exc()
                 return None
@@ -327,19 +313,13 @@ class ValidationAgent:
         # Filter out summary file
         extraction_files = [f for f in extraction_files if f.name != "extraction_summary.json"]
 
-        print(f"\n{'='*80}")
-        print(f"🚀 Starting validation for {len(extraction_files)} documents")
-        print(f"{'='*80}")
-        print(f"👷 Using {self.num_workers} parallel workers")
+        print(f"📝 Validating code examples for {len(extraction_files)} documents ({self.num_workers} workers)")
 
         # Create semaphore to limit concurrent workers
         semaphore = asyncio.Semaphore(self.num_workers)
 
         # Progress tracking
         progress = {'completed': 0, 'total': len(extraction_files)}
-
-        # Process all documents in parallel with worker limit
-        print(f"\n🚀 Starting parallel code validation...")
         tasks = [
             self._validate_document_with_save(extraction_file, semaphore, progress)
             for extraction_file in extraction_files
@@ -358,15 +338,9 @@ class ValidationAgent:
         total_examples = sum(r.total_examples for r in results)
         total_successful = sum(r.successful for r in results)
         total_failed = sum(r.failed for r in results)
+        total_skipped = sum(r.skipped for r in results)
 
-        print(f"\n{'='*80}")
-        print(f"✨ VALIDATION COMPLETE")
-        print(f"{'='*80}")
-        print(f"📊 Documents validated: {len(results)}")
-        print(f"📝 Total examples: {total_examples}")
-        print(f"✅ Successful: {total_successful}")
-        print(f"❌ Failed: {total_failed}")
-        print(f"⏱️  Validation duration: {validation_duration_seconds:.2f}s")
+        print(f"✅ Code validation complete: {total_successful} success, {total_failed} failed, {total_skipped} skipped ({validation_duration_seconds:.1f}s)")
 
         # Save summary with timing
         summary = {

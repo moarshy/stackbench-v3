@@ -426,10 +426,6 @@ class APISignatureValidationAgent:
         Returns:
             ValidationOutput with all validation results
         """
-        print(f"\n{'='*80}")
-        print(f"📄 Validating: {extraction_file.name}")
-        print(f"{'='*80}")
-
         start_time = datetime.now()
 
         # Read extraction data
@@ -442,14 +438,9 @@ class APISignatureValidationAgent:
         language = extraction_data.get("language", "python")
         signatures = extraction_data.get("signatures", [])
 
-        print(f"   📚 Library: {library} v{version}")
-        print(f"   📝 Document: {document_page}")
-        print(f"   🔍 Signatures: {len(signatures)}")
-
         warnings = []
 
         if not signatures:
-            print("   ⚠️  No signatures to validate")
             # Return empty result
             processing_time = int((datetime.now() - start_time).total_seconds() * 1000)
             return ValidationOutput(
@@ -484,8 +475,6 @@ class APISignatureValidationAgent:
 
         # Ask Claude to validate all signatures
         async with ClaudeSDKClient(options=self.options) as client:
-            print("\n   🔍 Running validation with Claude Code...")
-
             signatures_json = self.format_signatures_for_prompt(signatures)
             prompt = VALIDATION_PROMPT.format(
                 library=library,
@@ -499,7 +488,6 @@ class APISignatureValidationAgent:
 
             if not validation_data:
                 warnings.append("Failed to parse validation response from Claude")
-                print("   ❌ Failed to parse validation response")
                 # Return error result
                 processing_time = int((datetime.now() - start_time).total_seconds() * 1000)
                 return ValidationOutput(
@@ -622,15 +610,6 @@ class APISignatureValidationAgent:
 
             processing_time = int((datetime.now() - start_time).total_seconds() * 1000)
 
-            print(f"\n   📊 Results:")
-            print(f"      Total: {summary.total_signatures}")
-            print(f"      Valid: {summary.valid} ✅")
-            print(f"      Invalid: {summary.invalid} ⚠️")
-            print(f"      Not Found: {summary.not_found} ❌")
-            print(f"      Accuracy: {summary.accuracy_score * 100:.1f}%")
-            print(f"      Critical Issues: {summary.critical_issues}")
-            print(f"      Warnings: {summary.warnings}")
-
             return ValidationOutput(
                 validation_id=str(uuid.uuid4()),
                 validated_at=datetime.now().isoformat(),
@@ -663,7 +642,11 @@ class APISignatureValidationAgent:
                     f.write(validation_output.model_dump_json(indent=2))
 
                 progress['completed'] += 1
-                print(f"   💾 [{progress['completed']}/{progress['total']}] Saved {extraction_file.name}")
+                # Show meaningful stats: valid/invalid/not_found
+                v = validation_output.summary.valid
+                i = validation_output.summary.invalid
+                nf = validation_output.summary.not_found
+                print(f"✅ [{progress['completed']}/{progress['total']}] {extraction_file.stem.replace('_analysis', '')} - {v} valid, {i} invalid, {nf} not found")
 
                 return validation_output
 
@@ -687,18 +670,13 @@ class APISignatureValidationAgent:
             print(f"❌ No extraction files found in {self.extraction_folder}")
             return
 
-        print(f"\n📚 Found {len(extraction_files)} extraction files to validate")
-        print(f"📁 Output folder: {self.output_folder}")
-        print(f"👷 Using {self.num_workers} parallel workers")
+        print(f"🔍 Validating API signatures for {len(extraction_files)} documents ({self.num_workers} workers)")
 
         # Create semaphore to limit concurrent workers
         semaphore = asyncio.Semaphore(self.num_workers)
 
         # Progress tracking
         progress = {'completed': 0, 'total': len(extraction_files)}
-
-        # Process all documents in parallel with worker limit
-        print(f"\n🚀 Starting parallel API validation...")
         tasks = [
             self._validate_document_with_save(extraction_file, semaphore, progress)
             for extraction_file in extraction_files
@@ -714,15 +692,11 @@ class APISignatureValidationAgent:
         validation_duration_seconds = (validation_end_time - validation_start_time).total_seconds()
 
         # Create overall summary
-        print(f"\n{'='*80}")
-        print(f"✨ VALIDATION COMPLETE")
-        print(f"{'='*80}")
-        print(f"📊 Documents validated: {len(results)}")
-        print(f"🔍 Total signatures: {sum(r.summary.total_signatures for r in results)}")
-        print(f"✅ Valid: {sum(r.summary.valid for r in results)}")
-        print(f"⚠️  Invalid: {sum(r.summary.invalid for r in results)}")
-        print(f"❌ Not found: {sum(r.summary.not_found for r in results)}")
-        print(f"⏱️  Validation duration: {validation_duration_seconds:.2f}s")
+        total_sigs = sum(r.summary.total_signatures for r in results)
+        total_valid = sum(r.summary.valid for r in results)
+        total_invalid = sum(r.summary.invalid for r in results)
+        total_not_found = sum(r.summary.not_found for r in results)
+        print(f"✅ API validation complete: {total_valid} valid, {total_invalid} invalid, {total_not_found} not found ({validation_duration_seconds:.1f}s)")
 
         # Save overall summary with timing
         overall_summary = {
