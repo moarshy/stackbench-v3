@@ -1,12 +1,10 @@
 import { useState, useEffect } from 'react';
-import { FileText, CheckCircle2, Search, Settings as SettingsIcon, ChevronLeft, ChevronRight, Code, Zap, Play } from 'lucide-react';
+import { FileText, CheckCircle2, Search, Settings as SettingsIcon, ChevronLeft, ChevronRight, Code, Play } from 'lucide-react';
 import type {
   ExtractionOutput,
   ValidationOutput,
   CCAPISignatureValidationOutput,
   CCCodeExampleValidationOutput,
-  DSpyAPISignatureValidationOutput,
-  DSpyCodeExampleValidationOutput,
   RunInfo as RunInfoType
 } from './types';
 import { apiService } from './services/api';
@@ -25,8 +23,6 @@ function App() {
   const [validation, setValidation] = useState<ValidationOutput | null>(null);
   const [ccApiSigValidation, setCCApiSigValidation] = useState<CCAPISignatureValidationOutput | null>(null);
   const [ccCodeExValidation, setCCCodeExValidation] = useState<CCCodeExampleValidationOutput | null>(null);
-  const [dspyApiSigValidation, setDSpyApiSigValidation] = useState<DSpyAPISignatureValidationOutput | null>(null);
-  const [dspyCodeExValidation, setDSpyCodeExValidation] = useState<DSpyCodeExampleValidationOutput | null>(null);
   const [loading, setLoading] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [activeTab, setActiveTab] = useState('extraction');
@@ -101,17 +97,13 @@ function App() {
         extractionData,
         validationData,
         ccApiSigData,
-        ccCodeExData,
-        dspyApiSigData,
-        dspyCodeExData
+        ccCodeExData
       ] = await Promise.all([
         apiService.getDocumentationContent(docName),
         apiService.getExtractionOutput(docName),
         apiService.getValidationOutput(docName),
         apiService.getCCApiSignatureValidation(docName),
         apiService.getCCCodeExampleValidation(docName),
-        apiService.getDSpyApiSignatureValidation(docName),
-        apiService.getDSpyCodeExampleValidation(docName),
       ]);
 
       setDocContent(content);
@@ -119,8 +111,6 @@ function App() {
       setValidation(validationData);
       setCCApiSigValidation(ccApiSigData);
       setCCCodeExValidation(ccCodeExData);
-      setDSpyApiSigValidation(dspyApiSigData);
-      setDSpyCodeExValidation(dspyCodeExData);
     } catch (error) {
       console.error('Failed to load document data:', error);
     } finally {
@@ -130,10 +120,8 @@ function App() {
 
   const tabs = [
     { id: 'extraction', label: 'Extraction', icon: <Search className="h-4 w-4" /> },
-    { id: 'cc-api-sig', label: 'CC API Signature', icon: <CheckCircle2 className="h-4 w-4" /> },
-    { id: 'cc-code-ex', label: 'CC Code Examples', icon: <Code className="h-4 w-4" /> },
-    { id: 'dspy-api-sig', label: 'DSpy API Signature', icon: <Zap className="h-4 w-4" /> },
-    { id: 'dspy-code-ex', label: 'DSpy Code Example', icon: <Play className="h-4 w-4" /> },
+    { id: 'cc-api-sig', label: 'API Signature', icon: <CheckCircle2 className="h-4 w-4" /> },
+    { id: 'cc-code-ex', label: 'Code Examples', icon: <Code className="h-4 w-4" /> },
   ];
 
   return (
@@ -784,203 +772,6 @@ function App() {
                   ) : (
                     <p className="text-sm text-muted-foreground">
                       No CC code example validation data available
-                    </p>
-                  )}
-                </TabPanel>
-
-                {/* DSpy API Signature Tab */}
-                <TabPanel value="dspy-api-sig" activeTab={activeTab}>
-                  {loading ? (
-                    <div className="text-sm text-muted-foreground">Loading...</div>
-                  ) : dspyApiSigValidation ? (
-                    <div className="space-y-4">
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="p-4 rounded-md bg-green-500/10 border border-green-500/20">
-                          <div className="text-xs text-muted-foreground mb-1">Valid</div>
-                          <div className="text-3xl font-bold text-green-600">{dspyApiSigValidation.valid}</div>
-                        </div>
-                        <div className="p-4 rounded-md bg-red-500/10 border border-red-500/20">
-                          <div className="text-xs text-muted-foreground mb-1">Invalid</div>
-                          <div className="text-3xl font-bold text-red-600">{dspyApiSigValidation.invalid}</div>
-                        </div>
-                        <div className="p-4 rounded-md bg-blue-500/10 border border-blue-500/20">
-                          <div className="text-xs text-muted-foreground mb-1">Not Found</div>
-                          <div className="text-3xl font-bold text-blue-600">{dspyApiSigValidation.not_found}</div>
-                        </div>
-                        <div className="p-4 rounded-md bg-gray-500/10 border border-gray-500/20">
-                          <div className="text-xs text-muted-foreground mb-1">Error</div>
-                          <div className="text-3xl font-bold text-gray-600">{dspyApiSigValidation.error}</div>
-                        </div>
-                      </div>
-
-                      <div className="p-4 rounded-md bg-muted">
-                        <div className="text-sm font-medium mb-2">Total Signatures</div>
-                        <div className="text-4xl font-bold">{dspyApiSigValidation.total_signatures}</div>
-                        <div className="text-xs text-muted-foreground mt-2">
-                          Accuracy: {dspyApiSigValidation.total_signatures > 0
-                            ? ((dspyApiSigValidation.valid / dspyApiSigValidation.total_signatures) * 100).toFixed(1)
-                            : 0}%
-                        </div>
-                      </div>
-
-                      <div>
-                        <h4 className="text-sm font-semibold mb-3">Validation Details</h4>
-                        <div className="space-y-2">
-                          {dspyApiSigValidation.signatures.map((sig, idx) => (
-                            <div
-                              key={idx}
-                              className={`p-3 rounded-md border ${
-                                sig.status === 'valid'
-                                  ? 'bg-green-500/5 border-green-500/20'
-                                  : sig.status === 'invalid'
-                                    ? 'bg-red-500/5 border-red-500/20'
-                                    : sig.status === 'not_found'
-                                      ? 'bg-blue-500/5 border-blue-500/20'
-                                      : 'bg-gray-500/5 border-gray-500/20'
-                              }`}
-                            >
-                              <div className="flex items-start justify-between mb-2">
-                                <div className="font-mono text-sm font-semibold">{sig.function}</div>
-                                <span
-                                  className={`px-2 py-0.5 rounded text-xs font-medium ${
-                                    sig.status === 'valid'
-                                      ? 'bg-green-500/20 text-green-700'
-                                      : sig.status === 'invalid'
-                                        ? 'bg-red-500/20 text-red-700'
-                                        : sig.status === 'not_found'
-                                          ? 'bg-blue-500/20 text-blue-700'
-                                          : 'bg-gray-500/20 text-gray-700'
-                                  }`}
-                                >
-                                  {sig.status.replace('_', ' ')}
-                                </span>
-                              </div>
-                              {sig.issues.length > 0 && (
-                                <div className="mt-2 pt-2 border-t border-border/50">
-                                  <div className="text-xs font-medium mb-2">Issues:</div>
-                                  <div className="space-y-1">
-                                    {sig.issues.map((issue, issueIdx) => (
-                                      <div
-                                        key={issueIdx}
-                                        className={`text-xs p-2 rounded border-l-4 ${
-                                          issue.severity === 'critical'
-                                            ? 'bg-red-50 border-red-500 text-red-700'
-                                            : issue.severity === 'warning'
-                                              ? 'bg-yellow-50 border-yellow-500 text-yellow-700'
-                                              : 'bg-blue-50 border-blue-300 text-blue-700'
-                                        }`}
-                                      >
-                                        <div className="font-medium">{issue.type.replace(/_/g, ' ')}</div>
-                                        <div className="mt-0.5">{issue.message}</div>
-                                        <div className="mt-1 italic">Fix: {issue.suggested_fix}</div>
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">
-                      No DSpy API signature validation data available
-                    </p>
-                  )}
-                </TabPanel>
-
-                {/* DSpy Code Example Tab */}
-                <TabPanel value="dspy-code-ex" activeTab={activeTab}>
-                  {loading ? (
-                    <div className="text-sm text-muted-foreground">Loading...</div>
-                  ) : dspyCodeExValidation ? (
-                    <div className="space-y-4">
-                      <div className="grid grid-cols-3 gap-3">
-                        <div className="p-4 rounded-md bg-green-500/10 border border-green-500/20">
-                          <div className="text-xs text-muted-foreground mb-1">Passed</div>
-                          <div className="text-3xl font-bold text-green-600">{dspyCodeExValidation.passed}</div>
-                        </div>
-                        <div className="p-4 rounded-md bg-red-500/10 border border-red-500/20">
-                          <div className="text-xs text-muted-foreground mb-1">Failed</div>
-                          <div className="text-3xl font-bold text-red-600">{dspyCodeExValidation.failed}</div>
-                        </div>
-                        <div className="p-4 rounded-md bg-gray-500/10 border border-gray-500/20">
-                          <div className="text-xs text-muted-foreground mb-1">Skipped</div>
-                          <div className="text-3xl font-bold text-gray-600">{dspyCodeExValidation.skipped}</div>
-                        </div>
-                      </div>
-
-                      <div className="p-4 rounded-md bg-muted">
-                        <div className="text-sm font-medium mb-2">Summary</div>
-                        <div className="text-lg font-semibold mb-2">{dspyCodeExValidation.summary}</div>
-                        <div className="text-xs text-muted-foreground">
-                          Total Examples: {dspyCodeExValidation.total_examples} |
-                          Validation Time: {dspyCodeExValidation.validation_time_ms}ms
-                        </div>
-                      </div>
-
-                      <div>
-                        <h4 className="text-sm font-semibold mb-3">Example Results</h4>
-                        <div className="space-y-2">
-                          {dspyCodeExValidation.examples.map((example, idx) => (
-                            <div
-                              key={idx}
-                              className={`p-3 rounded-md border ${
-                                example.status === 'success'
-                                  ? 'bg-green-500/5 border-green-500/20'
-                                  : example.status === 'failure'
-                                    ? 'bg-red-500/5 border-red-500/20'
-                                    : 'bg-gray-500/5 border-gray-500/20'
-                              }`}
-                            >
-                              <div className="flex items-start justify-between mb-2">
-                                <div className="font-mono text-sm font-semibold">Example {example.example_index}</div>
-                                <span
-                                  className={`px-2 py-0.5 rounded text-xs font-medium ${
-                                    example.status === 'success'
-                                      ? 'bg-green-500/20 text-green-700'
-                                      : example.status === 'failure'
-                                        ? 'bg-red-500/20 text-red-700'
-                                        : 'bg-gray-500/20 text-gray-700'
-                                  }`}
-                                >
-                                  {example.status}
-                                </span>
-                              </div>
-                              <div className="text-xs text-muted-foreground mb-2">
-                                Context: {example.context} (Line {example.line})
-                              </div>
-                              <div className="text-xs text-muted-foreground mb-2">
-                                Execution Time: {example.execution_time_ms}ms
-                              </div>
-                              {example.dependencies_installed.length > 0 && (
-                                <div className="text-xs mb-2">
-                                  Dependencies: {example.dependencies_installed.join(', ')}
-                                </div>
-                              )}
-                              {example.error_message && (
-                                <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">
-                                  <div className="font-medium">Error:</div>
-                                  <div className="mt-1">{example.error_message}</div>
-                                </div>
-                              )}
-                              {example.execution_output && (
-                                <div className="mt-2">
-                                  <div className="text-xs font-medium mb-1">Output:</div>
-                                  <pre className="text-xs bg-muted p-2 rounded overflow-x-auto max-h-32">
-                                    {example.execution_output}
-                                  </pre>
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">
-                      No DSpy code example validation data available
                     </p>
                   )}
                 </TabPanel>
