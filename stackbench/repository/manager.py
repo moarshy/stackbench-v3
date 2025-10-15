@@ -18,12 +18,18 @@ class RunContext:
         run_id: str,
         repo_url: str,
         base_data_dir: Path,
-        analysis_type: str = "api_signature"
+        analysis_type: str = "api_signature",
+        library_name: Optional[str] = None,
+        library_version: Optional[str] = None,
+        branch: Optional[str] = None
     ):
         self.run_id = run_id
         self.repo_url = repo_url
         self.analysis_type = analysis_type
         self.base_data_dir = base_data_dir
+        self.library_name = library_name
+        self.library_version = library_version
+        self.branch = branch
 
         # Directory structure
         self.run_dir = base_data_dir / run_id
@@ -35,6 +41,8 @@ class RunContext:
         self.created_at = datetime.now().isoformat()
         self.completed_at: Optional[str] = None
         self.status = "initializing"
+        self.num_workers: Optional[int] = None
+        self.extraction_duration_seconds: Optional[float] = None
 
     @classmethod
     def create(
@@ -66,9 +74,14 @@ class RunContext:
             "run_id": self.run_id,
             "repo_url": self.repo_url,
             "analysis_type": self.analysis_type,
+            "library_name": self.library_name,
+            "library_version": self.library_version,
+            "branch": self.branch,
             "created_at": self.created_at,
             "completed_at": self.completed_at,
             "status": self.status,
+            "num_workers": self.num_workers,
+            "extraction_duration_seconds": self.extraction_duration_seconds,
         }
 
         metadata_file = self.run_dir / "metadata.json"
@@ -102,11 +115,16 @@ class RunContext:
             run_id=metadata["run_id"],
             repo_url=metadata["repo_url"],
             base_data_dir=base_data_dir,
-            analysis_type=metadata.get("analysis_type", "api_signature")
+            analysis_type=metadata.get("analysis_type", "api_signature"),
+            library_name=metadata.get("library_name"),
+            library_version=metadata.get("library_version"),
+            branch=metadata.get("branch")
         )
         context.created_at = metadata["created_at"]
         context.completed_at = metadata.get("completed_at")
         context.status = metadata["status"]
+        context.num_workers = metadata.get("num_workers")
+        context.extraction_duration_seconds = metadata.get("extraction_duration_seconds")
 
         return context
 
@@ -122,22 +140,44 @@ class RepositoryManager:
     def clone_repository(
         self,
         repo_url: str,
-        branch: str = "main"
+        branch: str = "main",
+        run_id: Optional[str] = None,
+        library_name: Optional[str] = None,
+        library_version: Optional[str] = None
     ) -> RunContext:
         """Clone repository and set up run directory structure.
 
         Args:
             repo_url: Git repository URL to clone
             branch: Git branch to clone (default: main)
+            run_id: Optional run ID (if None, will be auto-generated)
+            library_name: Optional library name for metadata
+            library_version: Optional library version for metadata
 
         Returns:
             RunContext with cloned repository and directory structure
         """
         # Create run context with configuration
-        context = RunContext.create(
-            repo_url=repo_url,
-            base_data_dir=self.base_data_dir
-        )
+        if run_id:
+            # Use provided run_id
+            context = RunContext(
+                run_id=run_id,
+                repo_url=repo_url,
+                base_data_dir=self.base_data_dir,
+                library_name=library_name,
+                library_version=library_version,
+                branch=branch
+            )
+        else:
+            # Generate run_id automatically
+            context = RunContext.create(
+                repo_url=repo_url,
+                base_data_dir=self.base_data_dir
+            )
+            # Update metadata fields even for auto-generated IDs
+            context.library_name = library_name
+            context.library_version = library_version
+            context.branch = branch
         context.create_directories()
 
         try:

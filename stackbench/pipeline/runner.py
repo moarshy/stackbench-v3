@@ -32,6 +32,7 @@ class DocumentationValidationPipeline:
         library_version: str,
         base_output_dir: Path,
         include_folders: Optional[List[str]] = None,
+        num_workers: int = 5,
     ):
         """
         Initialize the validation pipeline.
@@ -43,6 +44,7 @@ class DocumentationValidationPipeline:
             library_version: Library version to validate against
             base_output_dir: Base directory for all outputs
             include_folders: Specific documentation folders to analyze
+            num_workers: Number of parallel workers for extraction (default: 5)
         """
         self.repo_url = repo_url
         self.branch = branch
@@ -50,6 +52,7 @@ class DocumentationValidationPipeline:
         self.library_version = library_version
         self.base_output_dir = Path(base_output_dir)
         self.include_folders = include_folders
+        self.num_workers = num_workers
 
         # Generate unique run ID
         self.run_id = str(uuid.uuid4())
@@ -70,10 +73,14 @@ class DocumentationValidationPipeline:
         """
         print(f"\n🔄 Cloning repository: {self.repo_url}")
         print(f"   Branch: {self.branch}")
+        print(f"   Run ID: {self.run_id}")
 
         self.run_context = self.repo_manager.clone_repository(
             repo_url=self.repo_url,
-            branch=self.branch
+            branch=self.branch,
+            run_id=self.run_id,
+            library_name=self.library_name,
+            library_version=self.library_version
         )
 
         print(f"✅ Repository cloned to: {self.run_context.repo_dir}")
@@ -121,10 +128,16 @@ class DocumentationValidationPipeline:
             docs_folder=self.docs_folder,
             output_folder=extraction_output,
             repo_root=self.run_context.repo_dir,
-            default_version=self.library_version
+            default_version=self.library_version,
+            num_workers=self.num_workers
         )
 
         summary = await agent.process_all_documents(library_name=self.library_name)
+
+        # Save extraction metrics to run context
+        self.run_context.num_workers = self.num_workers
+        self.run_context.extraction_duration_seconds = summary.extraction_duration_seconds
+        self.run_context.save_metadata()
 
         print(f"✅ Extraction complete:")
         print(f"   Documents: {summary.processed}/{summary.total_documents}")
@@ -150,10 +163,11 @@ class DocumentationValidationPipeline:
 
         agent = APISignatureValidationAgent(
             extraction_folder=extraction_output,
-            output_folder=validation_output
+            output_folder=validation_output,
+            num_workers=self.num_workers
         )
 
-        await agent.validate_all_documents()
+        api_summary = await agent.validate_all_documents()
 
         # Load and return summary
         summary_file = validation_output / "validation_summary.json"
@@ -192,7 +206,8 @@ class DocumentationValidationPipeline:
 
         agent = CodeExampleValidationAgent(
             extraction_output_folder=extraction_output,
-            validation_output_folder=validation_output
+            validation_output_folder=validation_output,
+            num_workers=self.num_workers
         )
 
         summary = await agent.validate_all_documents()

@@ -48,6 +48,12 @@ def run(
         "-o",
         help="Output directory (default: ./data)",
     ),
+    num_workers: int = typer.Option(
+        5,
+        "--num-workers",
+        "-w",
+        help="Number of parallel workers for extraction (default: 5)",
+    ),
 ):
     """
     Run complete documentation validation pipeline.
@@ -82,7 +88,8 @@ def run(
         f"Repository: [yellow]{repo}[/yellow]\n"
         f"Branch: [yellow]{branch}[/yellow]\n"
         f"Library: [yellow]{library}[/yellow] v[yellow]{version}[/yellow]\n"
-        f"Output: [yellow]{output_dir}[/yellow]",
+        f"Output: [yellow]{output_dir}[/yellow]\n"
+        f"Workers: [yellow]{num_workers}[/yellow]",
         border_style="cyan"
     ))
 
@@ -95,6 +102,7 @@ def run(
             library=library,
             version=version,
             output_dir=output_dir,
+            num_workers=num_workers,
         ))
     except KeyboardInterrupt:
         console.print("\n[yellow]⚠️  Pipeline interrupted by user[/yellow]")
@@ -111,6 +119,7 @@ async def _run_pipeline(
     library: str,
     version: str,
     output_dir: Path,
+    num_workers: int,
 ):
     """Run the validation pipeline with progress tracking."""
 
@@ -122,6 +131,7 @@ async def _run_pipeline(
         library_name=library,
         library_version=version,
         base_output_dir=output_dir,
+        num_workers=num_workers,
     )
 
     # Run pipeline with progress tracking
