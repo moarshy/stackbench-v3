@@ -208,6 +208,8 @@ class ExtractionSummary(BaseModel):
     total_signatures: int = Field(description="Total signatures across all docs")
     total_examples: int = Field(description="Total examples across all docs")
     timestamp: str = Field(description="ISO timestamp of summary generation")
+    extraction_duration_seconds: Optional[float] = Field(None, description="Total time taken for extraction in seconds")
+    num_workers: Optional[int] = Field(None, description="Number of parallel workers used")
     documents: List[DocumentAnalysis] = Field(default_factory=list, description="All document analyses")
 
 
@@ -218,7 +220,7 @@ class ExtractionSummary(BaseModel):
 class DocumentationExtractionAgent:
     """Agent that extracts API signatures and code examples from markdown docs."""
 
-    def __init__(self, docs_folder: Path, output_folder: Path, repo_root: Optional[Path] = None, default_version: str = "0.25.2"):
+    def __init__(self, docs_folder: Path, output_folder: Path, repo_root: Optional[Path] = None, default_version: str = "0.25.2", num_workers: int = 5):
         """
         Initialize the extraction agent.
 
@@ -228,11 +230,13 @@ class DocumentationExtractionAgent:
             repo_root: Root directory of the repository (for resolving snippet references)
                       If None, will try to auto-detect from docs_folder
             default_version: Default library version to use if not found in docs (default: "0.25.2")
+            num_workers: Number of parallel workers for extraction (default: 5)
         """
         self.docs_folder = Path(docs_folder)
         self.output_folder = Path(output_folder)
         self.output_folder.mkdir(parents=True, exist_ok=True)
         self.default_version = default_version
+        self.num_workers = num_workers
 
         # Determine repo root
         if repo_root:
@@ -243,6 +247,7 @@ class DocumentationExtractionAgent:
 
         print(f"📁 Repository root: {self.repo_root}")
         print(f"📦 Default version: {self.default_version}")
+        print(f"👷 Workers: {self.num_workers}")
 
         # Configure Claude options (compatible with both old and new CLI versions)
         self.options = ClaudeAgentOptions(
@@ -465,16 +470,48 @@ class DocumentationExtractionAgent:
                     processing_time_ms=processing_time
                 )
     
+    async def _process_document_with_save(
+        self,
+        doc_path: Path,
+        library_name: Optional[str],
+        semaphore: asyncio.Semaphore,
+        progress: Dict[str, int]
+    ) -> Optional[DocumentAnalysis]:
+        """Process a single document with semaphore control and save results."""
+        async with semaphore:
+            try:
+                analysis = await self.analyze_document(doc_path, library_name)
+
+                # Save individual result
+                output_file = self.output_folder / f"{doc_path.stem}_analysis.json"
+                with open(output_file, 'w', encoding='utf-8') as f:
+                    f.write(analysis.model_dump_json(indent=2))
+
+                progress['completed'] += 1
+                print(f"   💾 [{progress['completed']}/{progress['total']}] Saved {doc_path.name}")
+
+                return analysis
+
+            except Exception as e:
+                progress['completed'] += 1
+                print(f"   ❌ [{progress['completed']}/{progress['total']}] Error processing {doc_path.name}: {e}")
+                import traceback
+                traceback.print_exc()
+                return None
+
     async def process_all_documents(self, library_name: Optional[str] = None) -> ExtractionSummary:
         """
-        Process all markdown files in the docs folder.
+        Process all markdown files in the docs folder using parallel workers.
 
         Args:
             library_name: Primary library name to extract (if None, will be auto-detected for each document)
 
         Returns:
-            ExtractionSummary containing results for all processed documents
+            ExtractionSummary containing results for all processed documents, including timing metrics
         """
+        # Track overall extraction time
+        extraction_start_time = datetime.now()
+
         # Find all markdown files
         md_files = list(self.docs_folder.glob("**/*.md"))
 
@@ -491,48 +528,49 @@ class DocumentationExtractionAgent:
 
         print(f"\n📚 Found {len(md_files)} markdown files to process")
         print(f"📁 Output folder: {self.output_folder}")
+        print(f"👷 Using {self.num_workers} parallel workers")
         if library_name:
             print(f"🎯 Primary library: {library_name}")
 
-        results = []
+        # Create semaphore to limit concurrent workers
+        semaphore = asyncio.Semaphore(self.num_workers)
 
-        for idx, doc_path in enumerate(md_files, 1):
-            print(f"\n[{idx}/{len(md_files)}] Processing {doc_path.name}...")
+        # Progress tracking
+        progress = {'completed': 0, 'total': len(md_files)}
 
-            try:
-                analysis = await self.analyze_document(doc_path, library_name)
-                results.append(analysis)
-                
-                # Save individual result using Pydantic's model_dump
-                # NOTE: Direct file writing bypasses validation hooks
-                # To enable validation hooks, use Claude's Write tool instead
-                output_file = self.output_folder / f"{doc_path.stem}_analysis.json"
-                with open(output_file, 'w', encoding='utf-8') as f:
-                    f.write(analysis.model_dump_json(indent=2))
-                
-                print(f"   💾 Saved to {output_file}")
-                
-            except Exception as e:
-                print(f"   ❌ Error processing {doc_path.name}: {e}")
-                import traceback
-                traceback.print_exc()
-        
-        # Create summary
+        # Process all documents in parallel with worker limit
+        print(f"\n🚀 Starting parallel extraction...")
+        tasks = [
+            self._process_document_with_save(doc_path, library_name, semaphore, progress)
+            for doc_path in md_files
+        ]
+
+        results = await asyncio.gather(*tasks)
+
+        # Filter out None results (failed extractions)
+        results = [r for r in results if r is not None]
+
+        # Calculate extraction duration
+        extraction_end_time = datetime.now()
+        extraction_duration_seconds = (extraction_end_time - extraction_start_time).total_seconds()
+
+        # Create summary with timing information
         summary = ExtractionSummary(
             total_documents=len(md_files),
             processed=len(results),
             total_signatures=sum(r.total_signatures for r in results),
             total_examples=sum(r.total_examples for r in results),
             timestamp=datetime.now().isoformat(),
+            extraction_duration_seconds=round(extraction_duration_seconds, 2),
+            num_workers=self.num_workers,
             documents=results
         )
-        
+
         # Save summary
-        # NOTE: Direct file writing bypasses validation hooks
         summary_file = self.output_folder / "extraction_summary.json"
         with open(summary_file, 'w', encoding='utf-8') as f:
             f.write(summary.model_dump_json(indent=2))
-        
+
         print(f"\n{'='*80}")
         print(f"✨ EXTRACTION COMPLETE")
         print(f"{'='*80}")
@@ -540,8 +578,9 @@ class DocumentationExtractionAgent:
         print(f"✅ Successfully processed: {summary.processed}")
         print(f"🔧 Total signatures extracted: {summary.total_signatures}")
         print(f"📝 Total examples extracted: {summary.total_examples}")
+        print(f"⏱️  Extraction duration: {extraction_duration_seconds:.2f}s")
         print(f"💾 Summary saved to: {summary_file}")
-        
+
         return summary
 
 
