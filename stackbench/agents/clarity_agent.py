@@ -368,8 +368,64 @@ SEVERITY LEVELS:
 Always be thorough, specific, and constructive. Your goal is to help documentation reach a 9+ clarity score."""
 
 
-def create_clarity_validation_prompt(document_page: str, library: str, version: str, language: str, content: str) -> str:
+def create_clarity_validation_prompt(
+    document_page: str,
+    markdown_file_path: str,
+    repository_root: str,
+    library: str,
+    version: str,
+    language: str,
+    content: str,
+    api_validation: Optional[Dict[str, Any]] = None,
+    code_validation: Optional[Dict[str, Any]] = None
+) -> str:
     """Create the validation prompt for analyzing a specific document."""
+
+    # Format validation context
+    api_summary = ""
+    code_summary = ""
+
+    if api_validation:
+        results = api_validation.get('validation_results', [])
+        valid = [r for r in results if r.get('status') == 'valid']
+        invalid = [r for r in results if r.get('status') == 'invalid']
+        not_found = [r for r in results if r.get('status') == 'not_found']
+
+        api_summary = f"""
+**API Signature Validation Results (from previous agent):**
+- Total signatures validated: {len(results)}
+- ✅ Valid: {len(valid)} - these signatures match the actual library API
+- ❌ Invalid: {len(invalid)} - parameter mismatches or wrong defaults
+- ⚠️  Not Found: {len(not_found)} - documented APIs that don't exist in the library
+
+{f"Invalid signatures: {', '.join(f'{r.get("function", "unknown")}()' for r in invalid[:5])}" if invalid else ""}
+{f"Not found: {', '.join(f'{r.get("function", "unknown")}()' for r in not_found[:5])}" if not_found else ""}
+"""
+    else:
+        api_summary = "**API Validation:** Not available for this document"
+
+    if code_validation:
+        results = code_validation.get('validation_results', [])
+        successful = [r for r in results if r.get('status') == 'success']
+        failed = [r for r in results if r.get('status') == 'failed']
+
+        failed_details = ""
+        if failed:
+            failed_details = "\nFailed examples (first 3):\n" + "\n".join(
+                f"  - Line {r.get('line', 'N/A')}: {r.get('error_type', 'Error')} - {r.get('error_message', '')[:60]}"
+                for r in failed[:3]
+            )
+
+        code_summary = f"""
+**Code Example Validation Results (from previous agent):**
+- Total examples validated: {len(results)}
+- ✅ Successful: {len(successful)} - these examples run without errors
+- ❌ Failed: {len(failed)} - runtime errors, syntax errors, or import issues
+{failed_details}
+"""
+    else:
+        code_summary = "**Code Validation:** Not available for this document"
+
     return f"""Analyze the following documentation for clarity, structure, and instructional quality.
 
 **Document Information:**
@@ -377,12 +433,62 @@ def create_clarity_validation_prompt(document_page: str, library: str, version: 
 - Library: {library} v{version}
 - Language: {language}
 
+**Document Location:**
+- Markdown file: {markdown_file_path}
+- Repository root: {repository_root}
+- You have access to the Read tool - use it to resolve snippet references and verify links
+
+**IMPORTANT - Documentation Build Directives:**
+
+This markdown may contain build-time directives that reference external files. These are NOT errors:
+
+1. **MkDocs Material snippets:**
+   ```
+   --8<-- "python/tests/test_file.py:label"
+   ```
+   To resolve: Use Read tool on `{repository_root}/python/tests/test_file.py`
+   Extract code between `# --8<-- [start:label]` and `# --8<-- [end:label]` markers
+
+2. **Sphinx literalinclude:**
+   ```
+   .. literalinclude:: path/to/file.py
+      :lines: 10-20
+   ```
+   To resolve: Use Read tool and extract specified lines
+
+3. **Other include patterns:**
+   Any file path references in special syntax should be resolved using Read tool
+
+**How to handle snippet directives:**
+- ✅ DO use Read tool to resolve and view the actual code
+- ✅ DO evaluate clarity based on the RESOLVED code content
+- ❌ DO NOT flag snippet directives as "incomplete code examples"
+- ❌ DO NOT penalize documentation for using build-time includes (this is best practice!)
+
+**How to handle relative links:**
+- Internal markdown links (`./file.md`, `../folder/file.md`) are documentation cross-references
+- Use Read tool to verify the target file exists: check `{repository_root}/docs/path/to/file.md`
+- Only flag as broken if:
+  - Target file doesn't exist in the repository, OR
+  - External URL (http/https) returns 404 or times out
+
+{api_summary}
+
+{code_summary}
+
+**Use validation results to enhance your analysis:**
+- Don't flag code examples as "unclear" if they already passed validation
+- DO flag examples that failed validation AND explain how clarity issues may have contributed
+- DO note when documented APIs don't exist (correlate with "not found" from API validation)
+- Provide richer insights by connecting clarity problems to actual validation failures
+
 **Your Task:**
 1. **Read through the entire document** as if you're a new user trying to follow it
-2. **Identify clarity issues** with specific locations (section, line, step number)
-3. **Score the documentation** on 5 dimensions (0.0-10.0 scale)
-4. **Check technical accessibility** (broken links, missing alt text, code blocks)
-5. **Provide actionable suggestions** for each issue
+2. **Resolve any snippet references** using the Read tool if needed
+3. **Identify clarity issues** with specific locations (section, line, step number)
+4. **Score the documentation** on 5 dimensions (0.0-10.0 scale)
+5. **Check technical accessibility** (broken links, missing alt text, code blocks)
+6. **Provide actionable suggestions** for each issue
 
 **Document Content:**
 ```markdown
@@ -394,9 +500,10 @@ def create_clarity_validation_prompt(document_page: str, library: str, version: 
 - Be GRANULAR: Not just "unclear" but "Step 3 at line 45 in section 'Configuration' references config.yaml never created"
 - Provide ACTIONABLE suggestions: Tell exactly how to fix each issue
 - Use the RUBRIC: Score based on the 0-10 scale defined in your system prompt
-- Check ALL links: Validate that internal and external links are not broken
+- Check ALL links: Use Read tool to verify internal links, check external URLs
 - Validate images: Check for missing alt text
 - Check code blocks: Ensure all have language specification (```python, not just ```)
+- Consider validation results: Correlate clarity issues with validation failures when relevant
 
 **OUTPUT FORMAT - Respond with ONLY this JSON structure:**
 
@@ -527,6 +634,43 @@ class DocumentationClarityAgent:
             print(f"📋 Per-document logging enabled")
             print(f"   Logs will be saved to: {self.validation_log_dir}/clarity_logs/")
 
+    def _load_validation_results(
+        self,
+        doc_stem: str
+    ) -> tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+        """
+        Load API signature and code validation results if they exist.
+
+        Args:
+            doc_stem: Document stem (e.g., 'pydantic' from 'pydantic_analysis.json')
+
+        Returns:
+            Tuple of (api_validation_dict, code_validation_dict)
+            Either can be None if file doesn't exist
+        """
+        api_validation = None
+        code_validation = None
+
+        # API validation file
+        api_file = self.output_folder.parent / "api_validation" / f"{doc_stem}_validation.json"
+        if api_file.exists():
+            try:
+                with open(api_file, 'r', encoding='utf-8') as f:
+                    api_validation = json.load(f)
+            except Exception as e:
+                console.print(f"[yellow]Warning: Could not load API validation for {doc_stem}: {e}[/yellow]")
+
+        # Code validation file
+        code_file = self.output_folder.parent / "code_validation" / f"{doc_stem}_validation.json"
+        if code_file.exists():
+            try:
+                with open(code_file, 'r', encoding='utf-8') as f:
+                    code_validation = json.load(f)
+            except Exception as e:
+                console.print(f"[yellow]Warning: Could not load code validation for {doc_stem}: {e}[/yellow]")
+
+        return api_validation, code_validation
+
     def extract_json_from_response(self, response_text: str) -> Optional[Dict[str, Any]]:
         """
         Extract JSON from Claude's response, handling markdown code blocks.
@@ -656,12 +800,15 @@ class DocumentationClarityAgent:
             with open(markdown_path, 'r', encoding='utf-8') as f:
                 content = f.read()
 
+            # Load validation results from previous agents
+            doc_stem = extraction_file.stem.replace('_analysis', '')
+            api_validation, code_validation = self._load_validation_results(doc_stem)
+
             # Create per-document logger
             from stackbench.hooks import create_agent_hooks, AgentLogger
 
             messages_log_file = None
             if self.validation_log_dir:
-                doc_stem = extraction_file.stem.replace('_analysis', '')
                 clarity_logs_dir = self.validation_log_dir / "clarity_logs" / doc_stem
                 clarity_logs_dir.mkdir(parents=True, exist_ok=True)
 
@@ -693,10 +840,14 @@ class DocumentationClarityAgent:
             async with ClaudeSDKClient(options=options) as client:
                 prompt = create_clarity_validation_prompt(
                     document_page=document_page,
+                    markdown_file_path=str(markdown_path.absolute()),
+                    repository_root=str(self.repository_folder.absolute()),
                     library=library,
                     version=version,
                     language=language,
-                    content=content
+                    content=content,
+                    api_validation=api_validation,
+                    code_validation=code_validation
                 )
 
                 response_text = await self.get_claude_response(client, prompt, logger, messages_log_file)
