@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
-from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions
+from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions, AssistantMessage, TextBlock
 
 console = Console()
 
@@ -571,16 +571,53 @@ class DocumentationClarityAgent:
         Returns:
             Response text from Claude
         """
-        response = await client.send_message(prompt)
-
-        # Log messages if logger provided
-        if logger and messages_log_file:
-            messages = await client.get_messages()
+        # Log the user prompt
+        if messages_log_file:
+            user_message_entry = {
+                "timestamp": datetime.now().isoformat(),
+                "role": "user",
+                "content": prompt
+            }
             with open(messages_log_file, 'a', encoding='utf-8') as f:
-                for msg in messages:
-                    f.write(json.dumps(msg) + '\n')
+                f.write(json.dumps(user_message_entry) + '\n')
 
-        return response
+        await client.query(prompt)
+
+        response_text = ""
+        async for message in client.receive_response():
+            if isinstance(message, AssistantMessage):
+                # Log the full assistant message
+                if messages_log_file:
+                    # Convert message blocks to serializable format
+                    message_content = []
+                    for block in message.content:
+                        if isinstance(block, TextBlock):
+                            message_content.append({
+                                "type": "text",
+                                "text": block.text
+                            })
+                            response_text += block.text
+                        else:
+                            # Handle other block types
+                            message_content.append({
+                                "type": type(block).__name__,
+                                "data": str(block)
+                            })
+
+                    assistant_message_entry = {
+                        "timestamp": datetime.now().isoformat(),
+                        "role": "assistant",
+                        "content": message_content
+                    }
+                    with open(messages_log_file, 'a', encoding='utf-8') as f:
+                        f.write(json.dumps(assistant_message_entry) + '\n')
+                else:
+                    # Original behavior when no logger
+                    for block in message.content:
+                        if isinstance(block, TextBlock):
+                            response_text += block.text
+
+        return response_text
 
     async def analyze_document(self, extraction_file: Path) -> Optional[DocumentClarityAnalysis]:
         """
