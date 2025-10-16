@@ -325,6 +325,42 @@ OUTPUT: Summary statistics + detailed JSON reports
 **Tier 4: Advanced**
 8. **Real-World Integration Gaps** - Missing error handling, security patterns, production considerations
 
+### Walkthrough-Based Validation System (Planned)
+
+A new **standalone system** for validating documentation through interactive, step-by-step execution:
+
+**Architecture:**
+- **Generate Agent**: Converts tutorial docs into structured walkthrough JSON with step-by-step instructions
+- **Audit Agent**: Actually follows the walkthrough like a real developer, executing each step
+- **MCP Server**: Supplies steps one-by-one via stdio, preventing the agent from skipping ahead
+- **Gap Detection**: Identifies 6 categories of issues:
+  - Clarity gaps (vague instructions, missing context)
+  - Prerequisite gaps (missing dependencies, undeclared requirements)
+  - Logical flow gaps (steps reference undefined resources)
+  - Execution gaps (commands fail, syntax errors)
+  - Completeness gaps (missing verification steps)
+  - Cross-reference gaps (should link to other docs)
+
+**Why It's Powerful:**
+- **Dynamic execution**: Agent experiences documentation like a real user would
+- **Controlled testing**: MCP server enforces sequential step execution
+- **Actionable feedback**: "At step 3, command failed because X was missing"
+- **Complements current system**: Static analysis catches API errors, walkthroughs catch tutorial issues
+
+**CLI Commands:**
+```bash
+# Generate walkthrough from tutorial docs
+stackbench walkthrough generate --repo <url> --doc-path docs/quickstart.md
+
+# Audit a walkthrough by executing it
+stackbench walkthrough audit --walkthrough ./data/wt_<UUID>/walkthrough.json
+
+# Full pipeline (generate + audit)
+stackbench walkthrough run --repo <url> --doc-path docs/quickstart.md --library <name>
+```
+
+See [local-docs/walkthrough-validation-plan.md](local-docs/walkthrough-validation-plan.md) for full design details.
+
 ### Technical Improvements
 
 - **Caching** - Don't re-extract unchanged docs

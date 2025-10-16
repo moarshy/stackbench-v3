@@ -263,6 +263,336 @@ def version():
     console.print("Documentation Quality Validation Tool")
 
 
+# ============================================================================
+# WALKTHROUGH COMMANDS
+# ============================================================================
+
+walkthrough_app = typer.Typer(
+    name="walkthrough",
+    help="Generate and audit interactive documentation walkthroughs",
+)
+app.add_typer(walkthrough_app, name="walkthrough")
+
+
+@walkthrough_app.command("generate")
+def walkthrough_generate(
+    doc_path: str = typer.Option(..., "--doc-path", "-d", help="Path to documentation file or folder"),
+    library: str = typer.Option(..., "--library", "-l", help="Primary library name"),
+    version: str = typer.Option(..., "--version", "-v", help="Library version"),
+    output: Optional[str] = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Output directory (default: ./data/wt_<UUID>)",
+    ),
+):
+    """
+    Generate a walkthrough from documentation.
+
+    This command analyzes tutorial/quickstart documentation and creates
+    a structured walkthrough JSON file with step-by-step instructions.
+
+    Example:
+        stackbench walkthrough generate \\
+            --doc-path docs/quickstart.md \\
+            --library lancedb \\
+            --version 0.25.2 \\
+            --output ./data/wt_abc123
+    """
+    from stackbench.walkthroughs.walkthrough_generate_agent import WalkthroughGenerateAgent
+
+    # Generate walkthrough ID
+    walkthrough_id = f"wt_{uuid.uuid4().hex[:8]}"
+
+    # Set output directory
+    if output:
+        output_dir = Path(output)
+    else:
+        output_dir = Path("./data") / walkthrough_id
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Display header
+    console.print(Panel.fit(
+        "[bold cyan]Walkthrough Generation[/bold cyan]\n\n"
+        f"Documentation: [yellow]{doc_path}[/yellow]\n"
+        f"Library: [yellow]{library}[/yellow] v[yellow]{version}[/yellow]\n"
+        f"Output: [yellow]{output_dir}[/yellow]\n"
+        f"Walkthrough ID: [yellow]{walkthrough_id}[/yellow]",
+        border_style="cyan"
+    ))
+
+    try:
+        # Create agent
+        agent = WalkthroughGenerateAgent(
+            output_folder=output_dir,
+            library_name=library,
+            library_version=version,
+        )
+
+        # Check if doc_path is file or folder
+        doc_path_obj = Path(doc_path)
+        if doc_path_obj.is_file():
+            # Single file
+            asyncio.run(agent.generate_walkthrough(doc_path_obj, walkthrough_id))
+        elif doc_path_obj.is_dir():
+            # Multiple files
+            md_files = list(doc_path_obj.glob("**/*.md"))
+            console.print(f"\n📚 Found {len(md_files)} markdown files")
+            asyncio.run(agent.generate_from_multiple_docs(md_files, walkthrough_id))
+        else:
+            console.print(f"[red]❌ Path not found: {doc_path}[/red]")
+            raise typer.Exit(1)
+
+        console.print(f"\n[bold green]✨ Generation complete![/bold green]")
+        console.print(f"   Output: [cyan]{output_dir}[/cyan]")
+
+    except Exception as e:
+        console.print(f"\n[red]❌ Error: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@walkthrough_app.command("audit")
+def walkthrough_audit(
+    walkthrough_path: str = typer.Option(..., "--walkthrough", "-w", help="Path to walkthrough JSON file"),
+    library: str = typer.Option(..., "--library", "-l", help="Library name"),
+    version: str = typer.Option(..., "--version", "-v", help="Library version"),
+    output: Optional[str] = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Output directory (default: same as walkthrough)",
+    ),
+    working_dir: Optional[str] = typer.Option(
+        None,
+        "--working-dir",
+        help="Working directory for execution (default: temp dir)",
+    ),
+):
+    """
+    Audit a walkthrough by executing it step-by-step.
+
+    This command uses a Claude Code agent to follow the walkthrough
+    and identify gaps, unclear instructions, and documentation issues.
+
+    Example:
+        stackbench walkthrough audit \\
+            --walkthrough ./data/wt_abc123/walkthrough.json \\
+            --library lancedb \\
+            --version 0.25.2
+    """
+    from stackbench.walkthroughs.walkthrough_audit_agent import WalkthroughAuditAgent
+
+    walkthrough_path_obj = Path(walkthrough_path)
+    if not walkthrough_path_obj.exists():
+        console.print(f"[red]❌ Walkthrough file not found: {walkthrough_path}[/red]")
+        raise typer.Exit(1)
+
+    # Set output directory
+    if output:
+        output_dir = Path(output)
+    else:
+        output_dir = walkthrough_path_obj.parent
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Set working directory
+    working_dir_obj = Path(working_dir) if working_dir else None
+
+    # Display header
+    console.print(Panel.fit(
+        "[bold cyan]Walkthrough Audit[/bold cyan]\n\n"
+        f"Walkthrough: [yellow]{walkthrough_path}[/yellow]\n"
+        f"Library: [yellow]{library}[/yellow] v[yellow]{version}[/yellow]\n"
+        f"Output: [yellow]{output_dir}[/yellow]",
+        border_style="cyan"
+    ))
+
+    try:
+        # Create agent
+        agent = WalkthroughAuditAgent(
+            output_folder=output_dir,
+            library_name=library,
+            library_version=version,
+        )
+
+        # Run audit
+        result = asyncio.run(agent.audit_walkthrough(
+            walkthrough_path=walkthrough_path_obj,
+            working_directory=working_dir_obj
+        ))
+
+        # Display results
+        console.print("\n")
+        console.print(Panel.fit(
+            "[bold green]✨ Audit Complete![/bold green]",
+            border_style="green"
+        ))
+
+        # Display audit summary
+        console.print("\n[bold]📊 Audit Summary[/bold]")
+        audit_table = Table(show_header=True, header_style="bold cyan")
+        audit_table.add_column("Metric")
+        audit_table.add_column("Value", justify="right")
+
+        audit_table.add_row("Steps Completed", f"{result.completed_steps}/{result.total_steps}")
+        audit_table.add_row("Success", "[green]Yes[/green]" if result.success else "[red]No[/red]")
+        audit_table.add_row("Duration", f"{result.duration_seconds:.1f}s")
+        audit_table.add_row("Total Gaps", str(len(result.gaps)))
+
+        console.print(audit_table)
+
+        # Display gaps by severity
+        if len(result.gaps) > 0:
+            console.print("\n[bold]🚨 Gaps by Severity[/bold]")
+            gaps_table = Table(show_header=True, header_style="bold cyan")
+            gaps_table.add_column("Severity")
+            gaps_table.add_column("Count", justify="right")
+
+            gaps_table.add_row("[red]Critical", str(result.critical_gaps))
+            gaps_table.add_row("[yellow]Warning", str(result.warning_gaps))
+            gaps_table.add_row("[cyan]Info", str(result.info_gaps))
+
+            console.print(gaps_table)
+
+            # Display gaps by type
+            console.print("\n[bold]📋 Gaps by Type[/bold]")
+            type_table = Table(show_header=True, header_style="bold cyan")
+            type_table.add_column("Type")
+            type_table.add_column("Count", justify="right")
+
+            type_table.add_row("Clarity", str(result.clarity_gaps))
+            type_table.add_row("Prerequisite", str(result.prerequisite_gaps))
+            type_table.add_row("Logical Flow", str(result.logical_flow_gaps))
+            type_table.add_row("Execution Error", str(result.execution_gaps))
+            type_table.add_row("Completeness", str(result.completeness_gaps))
+            type_table.add_row("Cross-Reference", str(result.cross_reference_gaps))
+
+            console.print(type_table)
+
+        console.print(f"\n[bold]📁 Results saved to:[/bold] [cyan]{output_dir}[/cyan]")
+
+    except Exception as e:
+        console.print(f"\n[red]❌ Error: {e}[/red]")
+        raise typer.Exit(1)
+
+
+@walkthrough_app.command("run")
+def walkthrough_run(
+    doc_path: str = typer.Option(..., "--doc-path", "-d", help="Path to documentation file or folder"),
+    library: str = typer.Option(..., "--library", "-l", help="Primary library name"),
+    version: str = typer.Option(..., "--version", "-v", help="Library version"),
+    output: Optional[str] = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Output directory (default: ./data/wt_<UUID>)",
+    ),
+    working_dir: Optional[str] = typer.Option(
+        None,
+        "--working-dir",
+        help="Working directory for audit execution (default: temp dir)",
+    ),
+):
+    """
+    Generate and audit a walkthrough (full pipeline).
+
+    This command combines generation and audit into a single workflow.
+
+    Example:
+        stackbench walkthrough run \\
+            --doc-path docs/quickstart.md \\
+            --library lancedb \\
+            --version 0.25.2
+    """
+    from stackbench.walkthroughs.walkthrough_generate_agent import WalkthroughGenerateAgent
+    from stackbench.walkthroughs.walkthrough_audit_agent import WalkthroughAuditAgent
+
+    # Generate walkthrough ID
+    walkthrough_id = f"wt_{uuid.uuid4().hex[:8]}"
+
+    # Set output directory
+    if output:
+        output_dir = Path(output)
+    else:
+        output_dir = Path("./data") / walkthrough_id
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Display header
+    console.print(Panel.fit(
+        "[bold cyan]Walkthrough Full Pipeline[/bold cyan]\n\n"
+        f"Documentation: [yellow]{doc_path}[/yellow]\n"
+        f"Library: [yellow]{library}[/yellow] v[yellow]{version}[/yellow]\n"
+        f"Output: [yellow]{output_dir}[/yellow]\n"
+        f"Walkthrough ID: [yellow]{walkthrough_id}[/yellow]",
+        border_style="cyan"
+    ))
+
+    try:
+        # Phase 1: Generate
+        console.print("\n[bold cyan]📝 Phase 1: Generating Walkthrough[/bold cyan]")
+        generate_agent = WalkthroughGenerateAgent(
+            output_folder=output_dir,
+            library_name=library,
+            library_version=version,
+        )
+
+        doc_path_obj = Path(doc_path)
+        if not doc_path_obj.exists():
+            console.print(f"[red]❌ Path not found: {doc_path}[/red]")
+            raise typer.Exit(1)
+
+        if doc_path_obj.is_file():
+            walkthrough_export = asyncio.run(generate_agent.generate_walkthrough(doc_path_obj, walkthrough_id))
+            walkthrough_file = output_dir / f"{walkthrough_id}.json"
+        else:
+            console.print(f"[red]❌ Full pipeline only supports single file. Use 'generate' for folders.[/red]")
+            raise typer.Exit(1)
+
+        console.print(f"[green]✅ Walkthrough generated[/green]")
+
+        # Phase 2: Audit
+        console.print("\n[bold cyan]🔍 Phase 2: Auditing Walkthrough[/bold cyan]")
+        audit_agent = WalkthroughAuditAgent(
+            output_folder=output_dir,
+            library_name=library,
+            library_version=version,
+        )
+
+        working_dir_obj = Path(working_dir) if working_dir else None
+        result = asyncio.run(audit_agent.audit_walkthrough(
+            walkthrough_path=walkthrough_file,
+            working_directory=working_dir_obj
+        ))
+
+        # Display final results
+        console.print("\n")
+        console.print(Panel.fit(
+            "[bold green]✨ Pipeline Complete![/bold green]",
+            border_style="green"
+        ))
+
+        console.print(f"\n[bold]📊 Final Summary[/bold]")
+        summary_table = Table(show_header=True, header_style="bold cyan")
+        summary_table.add_column("Metric")
+        summary_table.add_column("Value", justify="right")
+
+        summary_table.add_row("Walkthrough Title", walkthrough_export.walkthrough.title)
+        summary_table.add_row("Total Steps", str(len(walkthrough_export.steps)))
+        summary_table.add_row("Completed Steps", f"{result.completed_steps}/{result.total_steps}")
+        summary_table.add_row("Total Gaps Found", str(len(result.gaps)))
+        summary_table.add_row("Critical Gaps", f"[red]{result.critical_gaps}[/red]")
+        summary_table.add_row("Warnings", f"[yellow]{result.warning_gaps}[/yellow]")
+
+        console.print(summary_table)
+        console.print(f"\n[bold]📁 Results saved to:[/bold] [cyan]{output_dir}[/cyan]")
+
+    except Exception as e:
+        console.print(f"\n[red]❌ Error: {e}[/red]")
+        raise typer.Exit(1)
+
+
 def main():
     """Entry point for the CLI."""
     app()
