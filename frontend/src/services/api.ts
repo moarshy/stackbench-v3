@@ -3,6 +3,7 @@ import type {
   ValidationOutput,
   CCAPISignatureValidationOutput,
   CCCodeExampleValidationOutput,
+  CCClarityValidationOutput,
   DSpyAPISignatureValidationOutput,
   DSpyCodeExampleValidationOutput
 } from '../types';
@@ -213,6 +214,30 @@ export class APIService {
       return await response.json();
     } catch (error) {
       console.error('Error fetching CC code example validation:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get Claude Code clarity validation output
+   */
+  async getCCClarityValidation(docName: string): Promise<CCClarityValidationOutput | null> {
+    if (!this.currentRunId) {
+      return null;
+    }
+
+    try {
+      // Convert doc name to clarity file name (e.g., "pydantic.md" -> "pydantic_clarity.json")
+      const clarityFile = docName.replace('.md', '_clarity.json');
+      const clarityPath = this.getRunPath(`results/clarity_validation/${clarityFile}`);
+
+      const response = await fetch(`/api/file?path=${encodeURIComponent(clarityPath)}`);
+      if (!response.ok) {
+        return null;
+      }
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching CC clarity validation:', error);
       return null;
     }
   }

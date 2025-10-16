@@ -293,6 +293,96 @@ export interface DSpyCodeExampleValidationOutput {
 }
 
 // ============================================================================
+// Claude Code Clarity Validation Types
+// ============================================================================
+
+export interface ClarityIssue {
+  type: string; // missing_prerequisite, logical_gap, unclear_explanation, etc.
+  severity: 'critical' | 'warning' | 'info';
+  line: number;
+  section: string;
+  step_number: number | null;
+  message: string;
+  suggested_fix: string | null;
+  affected_code: string | null;
+  context_quote: string | null;
+}
+
+export interface StructuralIssue {
+  type: string; // buried_prerequisites, missing_step_numbers, etc.
+  severity: 'critical' | 'warning' | 'info';
+  location: string;
+  message: string;
+  suggested_fix: string | null;
+}
+
+export interface ClarityScore {
+  overall_score: number; // 0-10
+  instruction_clarity: number;
+  logical_flow: number;
+  completeness: number;
+  consistency: number;
+  prerequisite_coverage: number;
+  evaluation_criteria: Record<string, string>;
+  scoring_rationale: string | null;
+}
+
+export interface BrokenLink {
+  url: string;
+  line: number;
+  link_text: string;
+  error: string;
+}
+
+export interface MissingAltText {
+  image_path: string;
+  line: number;
+}
+
+export interface CodeBlockIssue {
+  line: number;
+  content_preview: string;
+}
+
+export interface TechnicalAccessibility {
+  broken_links: BrokenLink[];
+  missing_alt_text: MissingAltText[];
+  code_blocks_without_language: CodeBlockIssue[];
+  total_links_checked: number;
+  total_images_checked: number;
+  total_code_blocks_checked: number;
+  all_validated: boolean;
+}
+
+export interface ClaritySummary {
+  total_clarity_issues: number;
+  critical_clarity_issues: number;
+  warning_clarity_issues: number;
+  info_clarity_issues: number;
+  total_structural_issues: number;
+  critical_structural_issues: number;
+  total_technical_issues: number;
+  overall_quality_rating: 'excellent' | 'good' | 'needs_improvement' | 'poor';
+}
+
+export interface CCClarityValidationOutput {
+  validation_id: string;
+  validated_at: string;
+  source_file: string;
+  document_page: string;
+  library: string;
+  version: string;
+  language: string;
+  clarity_score: ClarityScore;
+  clarity_issues: ClarityIssue[];
+  structural_issues: StructuralIssue[];
+  technical_accessibility: TechnicalAccessibility;
+  summary: ClaritySummary;
+  processing_time_ms: number;
+  warnings: string[];
+}
+
+// ============================================================================
 // Run Management Types
 // ============================================================================
 

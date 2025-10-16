@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
-import { FileText, CheckCircle2, Search, Settings as SettingsIcon, ChevronLeft, ChevronRight, Code, Play } from 'lucide-react';
+import { FileText, CheckCircle2, Search, Settings as SettingsIcon, ChevronLeft, ChevronRight, Code, Play, BookOpen } from 'lucide-react';
 import type {
   ExtractionOutput,
   ValidationOutput,
   CCAPISignatureValidationOutput,
   CCCodeExampleValidationOutput,
+  CCClarityValidationOutput,
   RunInfo as RunInfoType
 } from './types';
 import { apiService } from './services/api';
@@ -23,6 +24,7 @@ function App() {
   const [validation, setValidation] = useState<ValidationOutput | null>(null);
   const [ccApiSigValidation, setCCApiSigValidation] = useState<CCAPISignatureValidationOutput | null>(null);
   const [ccCodeExValidation, setCCCodeExValidation] = useState<CCCodeExampleValidationOutput | null>(null);
+  const [ccClarityValidation, setCCClarityValidation] = useState<CCClarityValidationOutput | null>(null);
   const [loading, setLoading] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [activeTab, setActiveTab] = useState('extraction');
@@ -97,13 +99,15 @@ function App() {
         extractionData,
         validationData,
         ccApiSigData,
-        ccCodeExData
+        ccCodeExData,
+        ccClarityData
       ] = await Promise.all([
         apiService.getDocumentationContent(docName),
         apiService.getExtractionOutput(docName),
         apiService.getValidationOutput(docName),
         apiService.getCCApiSignatureValidation(docName),
         apiService.getCCCodeExampleValidation(docName),
+        apiService.getCCClarityValidation(docName),
       ]);
 
       setDocContent(content);
@@ -111,6 +115,7 @@ function App() {
       setValidation(validationData);
       setCCApiSigValidation(ccApiSigData);
       setCCCodeExValidation(ccCodeExData);
+      setCCClarityValidation(ccClarityData);
     } catch (error) {
       console.error('Failed to load document data:', error);
     } finally {
@@ -122,6 +127,7 @@ function App() {
     { id: 'extraction', label: 'Extraction', icon: <Search className="h-4 w-4" /> },
     { id: 'cc-api-sig', label: 'API Signature', icon: <CheckCircle2 className="h-4 w-4" /> },
     { id: 'cc-code-ex', label: 'Code Examples', icon: <Code className="h-4 w-4" /> },
+    { id: 'cc-clarity', label: 'Clarity', icon: <BookOpen className="h-4 w-4" /> },
   ];
 
   return (
@@ -772,6 +778,253 @@ function App() {
                   ) : (
                     <p className="text-sm text-muted-foreground">
                       No CC code example validation data available
+                    </p>
+                  )}
+                </TabPanel>
+
+                {/* CC Clarity Tab */}
+                <TabPanel value="cc-clarity" activeTab={activeTab}>
+                  {loading ? (
+                    <div className="text-sm text-muted-foreground">Loading...</div>
+                  ) : ccClarityValidation ? (
+                    <div className="space-y-4">
+                      {/* Overall Clarity Score */}
+                      <div className={`p-6 rounded-lg border ${
+                        ccClarityValidation.clarity_score.overall_score >= 8
+                          ? 'bg-green-500/10 border-green-500/20'
+                          : ccClarityValidation.clarity_score.overall_score >= 6
+                            ? 'bg-yellow-500/10 border-yellow-500/20'
+                            : 'bg-red-500/10 border-red-500/20'
+                      }`}>
+                        <div className="flex items-start justify-between mb-2">
+                          <div className="text-sm font-medium">Overall Clarity Score</div>
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                            ccClarityValidation.summary.overall_quality_rating === 'excellent'
+                              ? 'bg-green-500/20 text-green-700'
+                              : ccClarityValidation.summary.overall_quality_rating === 'good'
+                                ? 'bg-yellow-500/20 text-yellow-700'
+                                : ccClarityValidation.summary.overall_quality_rating === 'needs_improvement'
+                                  ? 'bg-orange-500/20 text-orange-700'
+                                  : 'bg-red-500/20 text-red-700'
+                          }`}>
+                            {ccClarityValidation.summary.overall_quality_rating.replace(/_/g, ' ')}
+                          </span>
+                        </div>
+                        <div className={`text-5xl font-bold ${
+                          ccClarityValidation.clarity_score.overall_score >= 8
+                            ? 'text-green-600'
+                            : ccClarityValidation.clarity_score.overall_score >= 6
+                              ? 'text-yellow-600'
+                              : 'text-red-600'
+                        }`}>
+                          {ccClarityValidation.clarity_score.overall_score.toFixed(1)}/10
+                        </div>
+                        {ccClarityValidation.clarity_score.scoring_rationale && (
+                          <div className="text-sm mt-3 opacity-90">
+                            {ccClarityValidation.clarity_score.scoring_rationale}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Dimension Scores */}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="p-3 rounded-md bg-muted">
+                          <div className="text-xs text-muted-foreground mb-1">Instruction Clarity</div>
+                          <div className="text-2xl font-bold">{ccClarityValidation.clarity_score.instruction_clarity.toFixed(1)}</div>
+                        </div>
+                        <div className="p-3 rounded-md bg-muted">
+                          <div className="text-xs text-muted-foreground mb-1">Logical Flow</div>
+                          <div className="text-2xl font-bold">{ccClarityValidation.clarity_score.logical_flow.toFixed(1)}</div>
+                        </div>
+                        <div className="p-3 rounded-md bg-muted">
+                          <div className="text-xs text-muted-foreground mb-1">Completeness</div>
+                          <div className="text-2xl font-bold">{ccClarityValidation.clarity_score.completeness.toFixed(1)}</div>
+                        </div>
+                        <div className="p-3 rounded-md bg-muted">
+                          <div className="text-xs text-muted-foreground mb-1">Consistency</div>
+                          <div className="text-2xl font-bold">{ccClarityValidation.clarity_score.consistency.toFixed(1)}</div>
+                        </div>
+                        <div className="p-3 rounded-md bg-muted col-span-2">
+                          <div className="text-xs text-muted-foreground mb-1">Prerequisite Coverage</div>
+                          <div className="text-2xl font-bold">{ccClarityValidation.clarity_score.prerequisite_coverage.toFixed(1)}</div>
+                        </div>
+                      </div>
+
+                      {/* Summary Stats */}
+                      <div className="grid grid-cols-3 gap-3">
+                        <div className="p-4 rounded-md bg-red-500/10 border border-red-500/20">
+                          <div className="text-xs text-muted-foreground mb-1">Critical Issues</div>
+                          <div className="text-3xl font-bold text-red-600">
+                            {ccClarityValidation.summary.critical_clarity_issues + ccClarityValidation.summary.critical_structural_issues}
+                          </div>
+                        </div>
+                        <div className="p-4 rounded-md bg-yellow-500/10 border border-yellow-500/20">
+                          <div className="text-xs text-muted-foreground mb-1">Warnings</div>
+                          <div className="text-3xl font-bold text-yellow-600">
+                            {ccClarityValidation.summary.warning_clarity_issues}
+                          </div>
+                        </div>
+                        <div className="p-4 rounded-md bg-blue-500/10 border border-blue-500/20">
+                          <div className="text-xs text-muted-foreground mb-1">Info</div>
+                          <div className="text-3xl font-bold text-blue-600">
+                            {ccClarityValidation.summary.info_clarity_issues}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Clarity Issues */}
+                      {ccClarityValidation.clarity_issues.length > 0 && (
+                        <div>
+                          <h4 className="text-sm font-semibold mb-3">Clarity Issues</h4>
+                          <div className="space-y-2">
+                            {ccClarityValidation.clarity_issues.map((issue, idx) => (
+                              <div
+                                key={idx}
+                                className={`p-3 rounded-md border-l-4 ${
+                                  issue.severity === 'critical'
+                                    ? 'bg-red-50 border-red-500'
+                                    : issue.severity === 'warning'
+                                      ? 'bg-yellow-50 border-yellow-500'
+                                      : 'bg-blue-50 border-blue-300'
+                                }`}
+                              >
+                                <div className="flex items-start justify-between mb-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                      issue.severity === 'critical'
+                                        ? 'bg-red-500/20 text-red-700'
+                                        : issue.severity === 'warning'
+                                          ? 'bg-yellow-500/20 text-yellow-700'
+                                          : 'bg-blue-500/20 text-blue-700'
+                                    }`}>
+                                      {issue.severity}
+                                    </span>
+                                    <span className="text-xs font-medium">
+                                      {issue.type.replace(/_/g, ' ')}
+                                    </span>
+                                  </div>
+                                  <div className="text-xs text-muted-foreground">
+                                    Line {issue.line} | {issue.section}
+                                    {issue.step_number && ` | Step ${issue.step_number}`}
+                                  </div>
+                                </div>
+                                <div className="text-sm mb-2">{issue.message}</div>
+                                {issue.context_quote && (
+                                  <div className="text-xs bg-white/50 p-2 rounded italic mb-2">
+                                    "{issue.context_quote}"
+                                  </div>
+                                )}
+                                {issue.affected_code && (
+                                  <pre className="text-xs bg-white/50 p-2 rounded mb-2 overflow-x-auto">
+                                    <code>{issue.affected_code}</code>
+                                  </pre>
+                                )}
+                                {issue.suggested_fix && (
+                                  <div className="text-xs mt-2 pt-2 border-t border-border/50">
+                                    <span className="font-medium">💡 Suggested Fix:</span> {issue.suggested_fix}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Structural Issues */}
+                      {ccClarityValidation.structural_issues.length > 0 && (
+                        <div>
+                          <h4 className="text-sm font-semibold mb-3">Structural Issues</h4>
+                          <div className="space-y-2">
+                            {ccClarityValidation.structural_issues.map((issue, idx) => (
+                              <div
+                                key={idx}
+                                className={`p-3 rounded-md border-l-4 ${
+                                  issue.severity === 'critical'
+                                    ? 'bg-red-50 border-red-500'
+                                    : issue.severity === 'warning'
+                                      ? 'bg-yellow-50 border-yellow-500'
+                                      : 'bg-blue-50 border-blue-300'
+                                }`}
+                              >
+                                <div className="flex items-start justify-between mb-2">
+                                  <div className="flex items-center gap-2">
+                                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                      issue.severity === 'critical'
+                                        ? 'bg-red-500/20 text-red-700'
+                                        : issue.severity === 'warning'
+                                          ? 'bg-yellow-500/20 text-yellow-700'
+                                          : 'bg-blue-500/20 text-blue-700'
+                                    }`}>
+                                      {issue.severity}
+                                    </span>
+                                    <span className="text-xs font-medium">
+                                      {issue.type.replace(/_/g, ' ')}
+                                    </span>
+                                  </div>
+                                </div>
+                                <div className="text-xs text-muted-foreground mb-2">{issue.location}</div>
+                                <div className="text-sm mb-2">{issue.message}</div>
+                                {issue.suggested_fix && (
+                                  <div className="text-xs mt-2 pt-2 border-t border-border/50">
+                                    <span className="font-medium">💡 Suggested Fix:</span> {issue.suggested_fix}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Technical Accessibility */}
+                      {(ccClarityValidation.technical_accessibility.broken_links.length > 0 ||
+                        ccClarityValidation.technical_accessibility.missing_alt_text.length > 0 ||
+                        ccClarityValidation.technical_accessibility.code_blocks_without_language.length > 0) && (
+                        <div>
+                          <h4 className="text-sm font-semibold mb-3">Technical Accessibility</h4>
+                          <div className="space-y-3">
+                            {ccClarityValidation.technical_accessibility.broken_links.length > 0 && (
+                              <div className="p-3 rounded-md bg-red-50 border border-red-200">
+                                <div className="text-xs font-medium mb-2 text-red-700">
+                                  🔗 Broken Links ({ccClarityValidation.technical_accessibility.broken_links.length})
+                                </div>
+                                {ccClarityValidation.technical_accessibility.broken_links.map((link, idx) => (
+                                  <div key={idx} className="text-xs mb-1">
+                                    <span className="font-mono">{link.url}</span> (Line {link.line}): {link.error}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {ccClarityValidation.technical_accessibility.missing_alt_text.length > 0 && (
+                              <div className="p-3 rounded-md bg-yellow-50 border border-yellow-200">
+                                <div className="text-xs font-medium mb-2 text-yellow-700">
+                                  🖼️ Missing Alt Text ({ccClarityValidation.technical_accessibility.missing_alt_text.length})
+                                </div>
+                                {ccClarityValidation.technical_accessibility.missing_alt_text.map((img, idx) => (
+                                  <div key={idx} className="text-xs mb-1">
+                                    {img.image_path} (Line {img.line})
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {ccClarityValidation.technical_accessibility.code_blocks_without_language.length > 0 && (
+                              <div className="p-3 rounded-md bg-blue-50 border border-blue-200">
+                                <div className="text-xs font-medium mb-2 text-blue-700">
+                                  💻 Code Blocks Without Language ({ccClarityValidation.technical_accessibility.code_blocks_without_language.length})
+                                </div>
+                                {ccClarityValidation.technical_accessibility.code_blocks_without_language.map((block, idx) => (
+                                  <div key={idx} className="text-xs mb-1">
+                                    Line {block.line}: <span className="font-mono">{block.content_preview}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      No CC clarity validation data available
                     </p>
                   )}
                 </TabPanel>
