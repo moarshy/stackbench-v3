@@ -671,6 +671,97 @@ class DocumentationClarityAgent:
 
         return api_validation, code_validation
 
+    def _preprocess_markdown_snippets(
+        self,
+        content: str,
+        markdown_path: Path,
+        repo_root: Path
+    ) -> tuple[str, list[str]]:
+        """
+        Pre-resolve common documentation snippet patterns (Level 2 - Fast Path).
+
+        This is an optimization to reduce agent tool calls. Deterministically resolves
+        common snippet patterns like MkDocs Material --8<-- includes. Falls back to
+        agent resolution for complex cases.
+
+        Args:
+            content: Raw markdown content
+            markdown_path: Path to the markdown file (for relative path resolution)
+            repo_root: Repository root directory
+
+        Returns:
+            Tuple of (processed_content, warnings)
+            - processed_content: Markdown with resolved snippets
+            - warnings: List of resolution warnings/failures
+        """
+        warnings = []
+        processed = content
+
+        # Pattern 1: MkDocs Material snippets --8<-- "path/to/file.py:label"
+        snippet_pattern = r'--8<--\s+"([^"]+)"'
+        matches = list(re.finditer(snippet_pattern, processed))
+
+        if not matches:
+            return processed, warnings
+
+        replacements = []  # Collect replacements to apply all at once
+
+        for match in matches:
+            reference = match.group(1)  # e.g., "python/tests/test_file.py:imports"
+
+            try:
+                # Parse reference
+                if ':' in reference:
+                    file_path, label = reference.rsplit(':', 1)
+                else:
+                    file_path, label = reference, None
+
+                # Resolve path relative to repo root
+                full_path = repo_root / file_path
+
+                if not full_path.exists():
+                    warnings.append(f"Snippet reference not found: {reference}")
+                    continue
+
+                # Read source file
+                with open(full_path, 'r', encoding='utf-8') as f:
+                    source_content = f.read()
+
+                # Extract snippet
+                snippet_code = None
+                if label:
+                    # Look for --8<-- [start:label] and [end:label] markers
+                    start_marker = f"# --8<-- [start:{label}]"
+                    end_marker = f"# --8<-- [end:{label}]"
+
+                    start_idx = source_content.find(start_marker)
+                    end_idx = source_content.find(end_marker)
+
+                    if start_idx != -1 and end_idx != -1:
+                        snippet_code = source_content[start_idx + len(start_marker):end_idx].strip()
+                    else:
+                        warnings.append(f"Snippet markers not found for: {reference}")
+                        continue
+                else:
+                    # No label - include entire file
+                    snippet_code = source_content
+
+                if snippet_code:
+                    # Store replacement (match, snippet_code)
+                    replacements.append((match, snippet_code))
+
+            except Exception as e:
+                warnings.append(f"Failed to resolve snippet {reference}: {e}")
+
+        # Apply all replacements (in reverse order to preserve match positions)
+        for match, snippet_code in reversed(replacements):
+            processed = processed[:match.start()] + snippet_code + processed[match.end():]
+
+        if replacements:
+            console.print(f"[dim]Pre-resolved {len(replacements)} snippet(s)[/dim]")
+
+        return processed, warnings
+
     def extract_json_from_response(self, response_text: str) -> Optional[Dict[str, Any]]:
         """
         Extract JSON from Claude's response, handling markdown code blocks.
@@ -804,6 +895,13 @@ class DocumentationClarityAgent:
             doc_stem = extraction_file.stem.replace('_analysis', '')
             api_validation, code_validation = self._load_validation_results(doc_stem)
 
+            # Pre-process snippets (Level 2 - deterministic fast path)
+            processed_content, snippet_warnings = self._preprocess_markdown_snippets(
+                content,
+                markdown_path,
+                self.repository_folder
+            )
+
             # Create per-document logger
             from stackbench.hooks import create_agent_hooks, AgentLogger
 
@@ -845,7 +943,7 @@ class DocumentationClarityAgent:
                     library=library,
                     version=version,
                     language=language,
-                    content=content,
+                    content=processed_content,  # Use pre-processed content with resolved snippets
                     api_validation=api_validation,
                     code_validation=code_validation
                 )
@@ -859,6 +957,9 @@ class DocumentationClarityAgent:
 
                 # Calculate processing time
                 processing_time = int((datetime.now() - start_time).total_seconds() * 1000)
+
+                # Combine snippet warnings with agent warnings
+                all_warnings = snippet_warnings + clarity_data.get('warnings', [])
 
                 # Construct DocumentClarityAnalysis
                 analysis = DocumentClarityAnalysis(
@@ -875,7 +976,7 @@ class DocumentationClarityAgent:
                     technical_accessibility=TechnicalAccessibility(**clarity_data.get('technical_accessibility', {})),
                     summary=clarity_data.get('summary', {}),
                     processing_time_ms=processing_time,
-                    warnings=clarity_data.get('warnings', [])
+                    warnings=all_warnings
                 )
 
                 # Save to file
