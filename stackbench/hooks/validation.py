@@ -775,3 +775,328 @@ def create_validation_output_hook(output_dir: Optional[Path] = None, log_dir: Op
             return {}
 
     return validation_output_hook
+
+
+# ============================================================================
+# WALKTHROUGH VALIDATION SCHEMAS
+# ============================================================================
+
+WALKTHROUGH_GENERATION_SCHEMA = {
+    "required_fields": [
+        "version", "exportedAt", "walkthrough", "steps"
+    ],
+    "optional_fields": ["metadata"],
+    "field_types": {
+        "version": str,
+        "exportedAt": str,
+        "walkthrough": dict,
+        "steps": list,
+        "metadata": (dict, type(None))
+    },
+    "nested_schemas": {
+        "walkthrough": {
+            "required_fields": [
+                "title", "description", "type", "status", "createdAt", "updatedAt",
+                "estimatedDurationMinutes", "tags"
+            ],
+            "optional_fields": ["metadata"],
+            "field_types": {
+                "title": str,
+                "description": str,
+                "type": str,
+                "status": str,
+                "createdAt": int,
+                "updatedAt": int,
+                "estimatedDurationMinutes": int,
+                "tags": list,
+                "metadata": (dict, type(None))
+            }
+        },
+        "steps": {
+            "required_fields": [
+                "title", "contentFields", "displayOrder", "createdAt", "updatedAt", "nextStepReference"
+            ],
+            "optional_fields": ["metadata"],
+            "field_types": {
+                "title": str,
+                "contentFields": dict,
+                "displayOrder": int,
+                "createdAt": int,
+                "updatedAt": int,
+                "metadata": (dict, type(None)),
+                "nextStepReference": (int, type(None))
+            }
+        }
+    }
+}
+
+WALKTHROUGH_AUDIT_SCHEMA = {
+    "required_fields": [
+        "walkthrough_id", "walkthrough_title", "library_name", "library_version",
+        "started_at", "completed_at", "duration_seconds", "total_steps",
+        "completed_steps", "failed_steps", "success", "gaps"
+    ],
+    "optional_fields": [
+        "clarity_gaps", "prerequisite_gaps", "logical_flow_gaps",
+        "execution_gaps", "completeness_gaps", "cross_reference_gaps",
+        "critical_gaps", "warning_gaps", "info_gaps",
+        "execution_log", "agent_log_path"
+    ],
+    "field_types": {
+        "walkthrough_id": str,
+        "walkthrough_title": str,
+        "library_name": str,
+        "library_version": str,
+        "started_at": str,
+        "completed_at": str,
+        "duration_seconds": (int, float),
+        "total_steps": int,
+        "completed_steps": int,
+        "failed_steps": int,
+        "success": bool,
+        "gaps": list,
+        "clarity_gaps": int,
+        "prerequisite_gaps": int,
+        "logical_flow_gaps": int,
+        "execution_gaps": int,
+        "completeness_gaps": int,
+        "cross_reference_gaps": int,
+        "critical_gaps": int,
+        "warning_gaps": int,
+        "info_gaps": int,
+        "execution_log": (str, type(None)),
+        "agent_log_path": (str, type(None))
+    },
+    "nested_schemas": {
+        "gaps": {
+            "required_fields": [
+                "step_number", "step_title", "gap_type", "severity", "description", "timestamp"
+            ],
+            "optional_fields": ["suggested_fix", "context"],
+            "field_types": {
+                "step_number": int,
+                "step_title": str,
+                "gap_type": str,
+                "severity": str,
+                "description": str,
+                "suggested_fix": (str, type(None)),
+                "context": (str, type(None)),
+                "timestamp": str
+            }
+        }
+    }
+}
+
+
+def create_walkthrough_generation_validation_hook(output_dir: Optional[Path] = None, log_dir: Optional[Path] = None):
+    """
+    Create a PreToolUse hook that validates walkthrough generation JSON output.
+
+    Args:
+        output_dir: Optional expected output directory for location validation
+        log_dir: Optional directory to log validation calls
+
+    Returns:
+        Async hook function
+    """
+    async def walkthrough_generation_validation_hook(
+        input_data: Dict[str, Any],
+        tool_use_id: Optional[str],  # noqa: ARG001 - Required by hook signature
+        context: Any  # noqa: ARG001 - Required by hook signature
+    ) -> Dict[str, Any]:
+        """Validate walkthrough generation JSON before writing."""
+        try:
+            tool_name = input_data.get('tool_name', '')
+            tool_input = input_data.get('tool_input', {})
+            file_path = tool_input.get('file_path', '')
+
+            # Only validate Write operations on walkthrough JSON files
+            if tool_name != 'Write':
+                return {}
+
+            filename = Path(file_path).name
+            if not filename.endswith('.json'):
+                return {}
+
+            # Validate output directory if specified
+            if output_dir:
+                abs_file_path = Path(file_path).resolve()
+                abs_output_dir = output_dir.resolve()
+                file_dir = abs_file_path.parent
+
+                if not str(file_dir).startswith(str(abs_output_dir)):
+                    reason = f"Files must be created in {abs_output_dir}, not {file_dir}"
+
+                    # Log validation failure
+                    if log_dir:
+                        log_validation_call(log_dir, "walkthrough_generation_validation", filename, False, reason=reason)
+
+                    return {
+                        'hookSpecificOutput': {
+                            'hookEventName': 'PreToolUse',
+                            'permissionDecision': 'deny',
+                            'permissionDecisionReason': reason
+                        }
+                    }
+
+            # Validate JSON content
+            content = tool_input.get('content', '')
+            if not content:
+                return {}
+
+            try:
+                data = json.loads(content)
+            except json.JSONDecodeError as e:
+                reason = f"Invalid JSON: {e}"
+
+                # Log validation failure
+                if log_dir:
+                    log_validation_call(log_dir, "walkthrough_generation_validation", filename, False, reason=reason)
+
+                return {
+                    'hookSpecificOutput': {
+                        'hookEventName': 'PreToolUse',
+                        'permissionDecision': 'deny',
+                        'permissionDecisionReason': reason
+                    }
+                }
+
+            # Validate structure
+            errors = validate_json_structure(data, WALKTHROUGH_GENERATION_SCHEMA)
+
+            if errors:
+                error_msg = f"Schema validation failed: {'; '.join(errors[:3])}"
+
+                # Log validation failure
+                if log_dir:
+                    log_validation_call(log_dir, "walkthrough_generation_validation", filename, False, errors=errors, reason="Schema validation failed")
+
+                return {
+                    'hookSpecificOutput': {
+                        'hookEventName': 'PreToolUse',
+                        'permissionDecision': 'deny',
+                        'permissionDecisionReason': error_msg
+                    }
+                }
+
+            # Validation passed - log success
+            if log_dir:
+                log_validation_call(log_dir, "walkthrough_generation_validation", filename, True)
+
+            return {}  # Validation passed
+
+        except Exception as e:
+            # Log error but don't block
+            print(f"⚠️  Validation hook error: {e}")
+            if log_dir:
+                log_validation_call(log_dir, "walkthrough_generation_validation", filename or "unknown", False, reason=f"Hook error: {e}")
+            return {}
+
+    return walkthrough_generation_validation_hook
+
+
+def create_walkthrough_audit_validation_hook(output_dir: Optional[Path] = None, log_dir: Optional[Path] = None):
+    """
+    Create a PreToolUse hook that validates walkthrough audit JSON output.
+
+    Args:
+        output_dir: Optional expected output directory for location validation
+        log_dir: Optional directory to log validation calls
+
+    Returns:
+        Async hook function
+    """
+    async def walkthrough_audit_validation_hook(
+        input_data: Dict[str, Any],
+        tool_use_id: Optional[str],  # noqa: ARG001 - Required by hook signature
+        context: Any  # noqa: ARG001 - Required by hook signature
+    ) -> Dict[str, Any]:
+        """Validate walkthrough audit JSON before writing."""
+        try:
+            tool_name = input_data.get('tool_name', '')
+            tool_input = input_data.get('tool_input', {})
+            file_path = tool_input.get('file_path', '')
+
+            # Only validate Write operations on audit result files
+            if tool_name != 'Write':
+                return {}
+
+            filename = Path(file_path).name
+            if not filename.endswith('_audit.json'):
+                return {}
+
+            # Validate output directory if specified
+            if output_dir:
+                abs_file_path = Path(file_path).resolve()
+                abs_output_dir = output_dir.resolve()
+                file_dir = abs_file_path.parent
+
+                if not str(file_dir).startswith(str(abs_output_dir)):
+                    reason = f"Files must be created in {abs_output_dir}, not {file_dir}"
+
+                    # Log validation failure
+                    if log_dir:
+                        log_validation_call(log_dir, "walkthrough_audit_validation", filename, False, reason=reason)
+
+                    return {
+                        'hookSpecificOutput': {
+                            'hookEventName': 'PreToolUse',
+                            'permissionDecision': 'deny',
+                            'permissionDecisionReason': reason
+                        }
+                    }
+
+            # Validate JSON content
+            content = tool_input.get('content', '')
+            if not content:
+                return {}
+
+            try:
+                data = json.loads(content)
+            except json.JSONDecodeError as e:
+                reason = f"Invalid JSON: {e}"
+
+                # Log validation failure
+                if log_dir:
+                    log_validation_call(log_dir, "walkthrough_audit_validation", filename, False, reason=reason)
+
+                return {
+                    'hookSpecificOutput': {
+                        'hookEventName': 'PreToolUse',
+                        'permissionDecision': 'deny',
+                        'permissionDecisionReason': reason
+                    }
+                }
+
+            # Validate structure
+            errors = validate_json_structure(data, WALKTHROUGH_AUDIT_SCHEMA)
+
+            if errors:
+                error_msg = f"Schema validation failed: {'; '.join(errors[:3])}"
+
+                # Log validation failure
+                if log_dir:
+                    log_validation_call(log_dir, "walkthrough_audit_validation", filename, False, errors=errors, reason="Schema validation failed")
+
+                return {
+                    'hookSpecificOutput': {
+                        'hookEventName': 'PreToolUse',
+                        'permissionDecision': 'deny',
+                        'permissionDecisionReason': error_msg
+                    }
+                }
+
+            # Validation passed - log success
+            if log_dir:
+                log_validation_call(log_dir, "walkthrough_audit_validation", filename, True)
+
+            return {}  # Validation passed
+
+        except Exception as e:
+            # Log error but don't block
+            print(f"⚠️  Validation hook error: {e}")
+            if log_dir:
+                log_validation_call(log_dir, "walkthrough_audit_validation", filename or "unknown", False, reason=f"Hook error: {e}")
+            return {}
+
+    return walkthrough_audit_validation_hook

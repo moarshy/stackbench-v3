@@ -349,15 +349,38 @@ A new **standalone system** for validating documentation through interactive, st
 
 **CLI Commands:**
 ```bash
-# Generate walkthrough from tutorial docs
-stackbench walkthrough generate --repo <url> --doc-path docs/quickstart.md
+# Generate from existing core pipeline run (reuses cloned repo)
+stackbench walkthrough generate \
+  --from-run <uuid> \
+  --doc-path docs/quickstart.md \
+  --library <name> \
+  --version <version>
+
+# Generate fresh (clones new repo)
+stackbench walkthrough generate \
+  --repo <url> \
+  --branch main \
+  --doc-path docs/quickstart.md \
+  --library <name> \
+  --version <version>
 
 # Audit a walkthrough by executing it
-stackbench walkthrough audit --walkthrough ./data/wt_<UUID>/walkthrough.json
+stackbench walkthrough audit \
+  --walkthrough data/<uuid>/walkthroughs/wt_*/walkthrough.json \
+  --library <name> \
+  --version <version>
 
-# Full pipeline (generate + audit)
-stackbench walkthrough run --repo <url> --doc-path docs/quickstart.md --library <name>
+# Full pipeline (clone + generate + audit)
+stackbench walkthrough run \
+  --repo <url> \
+  --branch main \
+  --doc-path docs/quickstart.md \
+  --library <name> \
+  --version <version>
 ```
+
+**Directory Structure:**
+All walkthroughs live under `data/<uuid>/walkthroughs/wt_*/` where `<uuid>` is either from an existing core pipeline run or a new walkthrough-only run. This ensures the audit agent has access to the full repository context.
 
 See [local-docs/walkthrough-validation-plan.md](local-docs/walkthrough-validation-plan.md) for full design details.
 

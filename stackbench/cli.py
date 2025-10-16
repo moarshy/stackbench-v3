@@ -276,14 +276,25 @@ app.add_typer(walkthrough_app, name="walkthrough")
 
 @walkthrough_app.command("generate")
 def walkthrough_generate(
-    doc_path: str = typer.Option(..., "--doc-path", "-d", help="Path to documentation file or folder"),
+    doc_path: str = typer.Option(..., "--doc-path", "-d", help="Path to documentation file (relative to repo root)"),
     library: str = typer.Option(..., "--library", "-l", help="Primary library name"),
     version: str = typer.Option(..., "--version", "-v", help="Library version"),
-    output: Optional[str] = typer.Option(
+    from_run: Optional[str] = typer.Option(
         None,
-        "--output",
-        "-o",
-        help="Output directory (default: ./data/wt_<UUID>)",
+        "--from-run",
+        help="Reuse existing run UUID (from core pipeline)",
+    ),
+    repo: Optional[str] = typer.Option(
+        None,
+        "--repo",
+        "-r",
+        help="Git repository URL (for fresh clone)",
+    ),
+    branch: str = typer.Option(
+        "main",
+        "--branch",
+        "-b",
+        help="Git branch to clone (default: main)",
     ),
 ):
     """
@@ -292,63 +303,160 @@ def walkthrough_generate(
     This command analyzes tutorial/quickstart documentation and creates
     a structured walkthrough JSON file with step-by-step instructions.
 
-    Example:
+    Two modes:
+    1. From existing run: --from-run <uuid> (reuses cloned repo)
+    2. Fresh clone: --repo <url> --branch <branch> (clones new repo)
+
+    Example (from existing run):
         stackbench walkthrough generate \\
+            --from-run 22c09315-1385-4ad6-a2ff-1e631a482107 \\
             --doc-path docs/quickstart.md \\
             --library lancedb \\
-            --version 0.25.2 \\
-            --output ./data/wt_abc123
+            --version 0.25.2
+
+    Example (fresh clone):
+        stackbench walkthrough generate \\
+            --repo https://github.com/lancedb/lancedb \\
+            --branch main \\
+            --doc-path docs/quickstart.md \\
+            --library lancedb \\
+            --version 0.25.2
     """
     from stackbench.walkthroughs.walkthrough_generate_agent import WalkthroughGenerateAgent
+    from stackbench.repository import RepositoryManager
+
+    # Validate: Must have either --from-run OR --repo
+    if not from_run and not repo:
+        console.print("[red]❌ Error: Must specify either --from-run or --repo[/red]")
+        raise typer.Exit(1)
+
+    if from_run and repo:
+        console.print("[red]❌ Error: Cannot specify both --from-run and --repo[/red]")
+        raise typer.Exit(1)
 
     # Generate walkthrough ID
     walkthrough_id = f"wt_{uuid.uuid4().hex[:8]}"
 
-    # Set output directory
-    if output:
-        output_dir = Path(output)
-    else:
-        output_dir = Path("./data") / walkthrough_id
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Display header
-    console.print(Panel.fit(
-        "[bold cyan]Walkthrough Generation[/bold cyan]\n\n"
-        f"Documentation: [yellow]{doc_path}[/yellow]\n"
-        f"Library: [yellow]{library}[/yellow] v[yellow]{version}[/yellow]\n"
-        f"Output: [yellow]{output_dir}[/yellow]\n"
-        f"Walkthrough ID: [yellow]{walkthrough_id}[/yellow]",
-        border_style="cyan"
-    ))
+    base_data_dir = Path("./data")
 
     try:
-        # Create agent
-        agent = WalkthroughGenerateAgent(
-            output_folder=output_dir,
-            library_name=library,
-            library_version=version,
-        )
+        # Scenario 1: From existing run
+        if from_run:
+            parent_run_dir = base_data_dir / from_run
+            if not parent_run_dir.exists():
+                console.print(f"[red]❌ Run not found: {from_run}[/red]")
+                raise typer.Exit(1)
 
-        # Check if doc_path is file or folder
-        doc_path_obj = Path(doc_path)
-        if doc_path_obj.is_file():
-            # Single file
-            asyncio.run(agent.generate_walkthrough(doc_path_obj, walkthrough_id))
-        elif doc_path_obj.is_dir():
-            # Multiple files
-            md_files = list(doc_path_obj.glob("**/*.md"))
-            console.print(f"\n📚 Found {len(md_files)} markdown files")
-            asyncio.run(agent.generate_from_multiple_docs(md_files, walkthrough_id))
+            repo_dir = parent_run_dir / "repository"
+            if not repo_dir.exists():
+                console.print(f"[red]❌ Repository not found in run: {from_run}[/red]")
+                raise typer.Exit(1)
+
+            # Create walkthroughs directory
+            walkthroughs_dir = parent_run_dir / "walkthroughs"
+            walkthroughs_dir.mkdir(exist_ok=True)
+
+            # Create specific walkthrough directory
+            walkthrough_dir = walkthroughs_dir / walkthrough_id
+            walkthrough_dir.mkdir(exist_ok=True)
+
+            # Display header
+            console.print(Panel.fit(
+                "[bold cyan]Walkthrough Generation (From Existing Run)[/bold cyan]\n\n"
+                f"Parent Run: [yellow]{from_run}[/yellow]\n"
+                f"Repository: [yellow]{repo_dir}[/yellow]\n"
+                f"Documentation: [yellow]{doc_path}[/yellow]\n"
+                f"Library: [yellow]{library}[/yellow] v[yellow]{version}[/yellow]\n"
+                f"Walkthrough ID: [yellow]{walkthrough_id}[/yellow]\n"
+                f"Output: [yellow]{walkthrough_dir}[/yellow]",
+                border_style="cyan"
+            ))
+
+            # Resolve doc path relative to repo
+            doc_path_full = repo_dir / doc_path
+            if not doc_path_full.exists():
+                console.print(f"[red]❌ Documentation not found: {doc_path_full}[/red]")
+                raise typer.Exit(1)
+
+            # Create agent
+            agent = WalkthroughGenerateAgent(
+                output_folder=walkthrough_dir,
+                library_name=library,
+                library_version=version,
+            )
+
+            # Generate walkthrough
+            asyncio.run(agent.generate_walkthrough(doc_path_full, walkthrough_id))
+
+            console.print(f"\n[bold green]✨ Generation complete![/bold green]")
+            console.print(f"   Output: [cyan]{walkthrough_dir}[/cyan]")
+
+        # Scenario 2: Fresh clone
         else:
-            console.print(f"[red]❌ Path not found: {doc_path}[/red]")
-            raise typer.Exit(1)
+            # Create new run directory
+            run_id = str(uuid.uuid4())
+            run_dir = base_data_dir / run_id
+            run_dir.mkdir(parents=True, exist_ok=True)
 
-        console.print(f"\n[bold green]✨ Generation complete![/bold green]")
-        console.print(f"   Output: [cyan]{output_dir}[/cyan]")
+            # Clone repository
+            console.print(f"\n🔄 Cloning repository: {repo}")
+
+            repo_manager = RepositoryManager(base_data_dir=base_data_dir)
+            run_context = repo_manager.clone_repository(
+                repo_url=repo,
+                branch=branch,
+                run_id=run_id,
+                library_name=library,
+                library_version=version
+            )
+
+            repo_dir = run_context.repo_dir
+
+            # Create walkthroughs directory
+            walkthroughs_dir = run_dir / "walkthroughs"
+            walkthroughs_dir.mkdir(exist_ok=True)
+
+            # Create specific walkthrough directory
+            walkthrough_dir = walkthroughs_dir / walkthrough_id
+            walkthrough_dir.mkdir(exist_ok=True)
+
+            # Display header
+            console.print(Panel.fit(
+                "[bold cyan]Walkthrough Generation (Fresh Clone)[/bold cyan]\n\n"
+                f"Repository: [yellow]{repo}[/yellow]\n"
+                f"Branch: [yellow]{branch}[/yellow]\n"
+                f"Run ID: [yellow]{run_id}[/yellow]\n"
+                f"Documentation: [yellow]{doc_path}[/yellow]\n"
+                f"Library: [yellow]{library}[/yellow] v[yellow]{version}[/yellow]\n"
+                f"Walkthrough ID: [yellow]{walkthrough_id}[/yellow]\n"
+                f"Output: [yellow]{walkthrough_dir}[/yellow]",
+                border_style="cyan"
+            ))
+
+            # Resolve doc path relative to repo
+            doc_path_full = repo_dir / doc_path
+            if not doc_path_full.exists():
+                console.print(f"[red]❌ Documentation not found: {doc_path_full}[/red]")
+                raise typer.Exit(1)
+
+            # Create agent
+            agent = WalkthroughGenerateAgent(
+                output_folder=walkthrough_dir,
+                library_name=library,
+                library_version=version,
+            )
+
+            # Generate walkthrough
+            asyncio.run(agent.generate_walkthrough(doc_path_full, walkthrough_id))
+
+            console.print(f"\n[bold green]✨ Generation complete![/bold green]")
+            console.print(f"   Run ID: [cyan]{run_id}[/cyan]")
+            console.print(f"   Output: [cyan]{walkthrough_dir}[/cyan]")
 
     except Exception as e:
         console.print(f"\n[red]❌ Error: {e}[/red]")
+        import traceback
+        traceback.print_exc()
         raise typer.Exit(1)
 
 

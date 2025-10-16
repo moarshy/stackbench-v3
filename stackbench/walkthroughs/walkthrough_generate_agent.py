@@ -17,6 +17,7 @@ from claude_agent_sdk import (
     ClaudeAgentOptions,
     AssistantMessage,
     TextBlock,
+    HookMatcher,
 )
 
 from .schemas import (
@@ -26,6 +27,9 @@ from .schemas import (
     Walkthrough,
     WalkthroughExport,
 )
+
+from stackbench.hooks.validation import create_walkthrough_generation_validation_hook
+from stackbench.hooks.logging import create_logging_hooks, AgentLogger
 
 from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv())
@@ -91,7 +95,9 @@ For each step, provide:
 - **operationsForAgent**: Exact commands and actions to execute
 - **introductionForAgent**: Purpose and goals of this step
 
-Return a JSON object matching this schema:
+**IMPORTANT**: You must use the Write tool to save the walkthrough JSON to `{output_file}`.
+
+The JSON object should match this schema:
 ```json
 {{
   "version": "1.0",
@@ -137,6 +143,7 @@ IMPORTANT:
 - Use actual timestamps (Unix milliseconds)
 - Be comprehensive - don't skip steps
 - Make operations concrete and executable
+- **Use the Write tool to save the JSON** - do not just return it in text
 """
 
 
@@ -233,13 +240,41 @@ class WalkthroughGenerateAgent:
         now_ms = int(time.time() * 1000)
         now_iso = datetime.now().isoformat() + "Z"
 
+        # Setup hooks
+        log_dir = self.output_folder / "agent_logs"
+        logger = AgentLogger(
+            log_file=log_dir / "generate.log",
+            tools_log_file=log_dir / "generate_tools.jsonl"
+        )
+        logging_hooks = create_logging_hooks(logger)
+
+        validation_hook = create_walkthrough_generation_validation_hook(
+            output_dir=self.output_folder,
+            log_dir=self.output_folder / "validation_logs"
+        )
+
+        hooks = {
+            'PreToolUse': [
+                HookMatcher(matcher="Write", hooks=[validation_hook])
+            ] + logging_hooks['PreToolUse'],
+            'PostToolUse': logging_hooks['PostToolUse']
+        }
+
         # Create Claude SDK client
         options = ClaudeAgentOptions(
             system_prompt=GENERATION_SYSTEM_PROMPT,
-            allowed_tools=["Read"],  # Only allow reading files (for snippet resolution)
+            allowed_tools=["Read", "Write"],  # Allow reading files and writing JSON
             permission_mode="acceptEdits",
-            cwd=str(Path.cwd())
+            cwd=str(Path.cwd()),
+            hooks=hooks
         )
+
+        # Use provided walkthrough_id or default to doc filename
+        if not walkthrough_id:
+            walkthrough_id = f"wt_{doc_path.stem}"
+
+        # Save to output folder
+        output_file = self.output_folder / f"{walkthrough_id}.json"
 
         async with ClaudeSDKClient(options=options) as client:
             # Generate walkthrough
@@ -252,39 +287,36 @@ class WalkthroughGenerateAgent:
                 created_at=now_ms,
                 updated_at=now_ms,
                 step_created_at=now_ms,
-                step_updated_at=now_ms
+                step_updated_at=now_ms,
+                output_file=str(output_file)
             )
 
-            response_text = await self.get_claude_response(client, prompt)
+            await client.query(prompt)
 
-            # Parse response
-            walkthrough_data = self.extract_json_from_response(response_text)
+            # Wait for agent to complete
+            async for message in client.receive_response():
+                pass  # Agent will use Write tool, hooks will validate
 
-            if not walkthrough_data:
-                raise ValueError("Failed to parse walkthrough JSON from agent response")
+        # Load the generated file
+        if not output_file.exists():
+            raise ValueError(f"Agent did not create output file: {output_file}")
 
-            # Validate and create WalkthroughExport
-            try:
-                walkthrough_export = WalkthroughExport(**walkthrough_data)
-            except Exception as e:
-                print(f"❌ Validation error: {e}")
-                raise ValueError(f"Generated walkthrough does not match schema: {e}")
+        with open(output_file, 'r', encoding='utf-8') as f:
+            walkthrough_data = json.load(f)
 
-            # Use provided walkthrough_id or default to doc filename
-            if not walkthrough_id:
-                walkthrough_id = f"wt_{doc_path.stem}"
+        # Validate and create WalkthroughExport
+        try:
+            walkthrough_export = WalkthroughExport(**walkthrough_data)
+        except Exception as e:
+            print(f"❌ Validation error: {e}")
+            raise ValueError(f"Generated walkthrough does not match schema: {e}")
 
-            # Save to output folder
-            output_file = self.output_folder / f"{walkthrough_id}.json"
-            with open(output_file, 'w', encoding='utf-8') as f:
-                f.write(walkthrough_export.model_dump_json(indent=2))
+        print(f"✅ Walkthrough generated: {output_file.name}")
+        print(f"   Title: {walkthrough_export.walkthrough.title}")
+        print(f"   Steps: {len(walkthrough_export.steps)}")
+        print(f"   Duration: ~{walkthrough_export.walkthrough.estimatedDurationMinutes} minutes")
 
-            print(f"✅ Walkthrough generated: {output_file.name}")
-            print(f"   Title: {walkthrough_export.walkthrough.title}")
-            print(f"   Steps: {len(walkthrough_export.steps)}")
-            print(f"   Duration: ~{walkthrough_export.walkthrough.estimatedDurationMinutes} minutes")
-
-            return walkthrough_export
+        return walkthrough_export
 
     async def generate_from_multiple_docs(
         self,
