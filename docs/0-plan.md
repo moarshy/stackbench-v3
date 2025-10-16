@@ -81,29 +81,106 @@ Establish style guide, flag violations, suggest standardized versions
 
 ---
 
-## 4. Accessibility & Clarity
+## 4. Documentation Clarity & Structure
+*(Instructions quality, logical flow, prerequisites, step completeness)*
 
 ### What to Detect:
+
+**Instructional Clarity:**
+- Instructions not informative enough or too vague
+- Missing prerequisites or setup requirements
+- Logical gaps in tutorial flow (Step 2 references something not created in Step 1)
+- Steps that assume prior knowledge not mentioned
+- Unclear explanations that don't match code examples
+- Missing context about what each step accomplishes
+
+**Structural Issues:**
+- Missing step numbers in sequential tutorials
+- Inconsistent section organization across similar guides
+- Walls of text without headers/structure
+- Examples without explanation of what they demonstrate
+- Prerequisites buried mid-tutorial instead of at the top
+- No clear indication of difficulty level or time required
+
+**Following Difficulty:**
+- "Difficult to follow" patterns that cause user drop-off
+- Terminology inconsistencies within the same guide
+- Ambiguous pronouns ("it", "this", "that" without clear reference)
+- Jargon used without definitions or links to glossary
+- Complex concepts introduced without scaffolding
+
+**Technical Accessibility:**
 - Broken links (internal and external)
 - Missing alt text for images/diagrams
 - Code blocks without language specification
-- Missing step numbers in sequential tutorials
-- Ambiguous pronouns ("it", "this", "that" without clear reference)
-- Jargon without definitions
-- Walls of text without headers/structure
-- Examples without explanation of what they demonstrate
+- Missing file/directory references in setup steps
 
 ### Example Issue:
-```markdown
-Click here to learn more about authentication.
-[Link is broken - 404]
+```python
+# Docs show (Step 2):
+# Configure your database connection
+config = lancedb.Config.from_file('config.yaml')
 
-See the configuration in the previous section.
-[No previous section exists on this page]
+# But Step 1 never mentioned creating config.yaml
+# User is stuck: "What should be in config.yaml?"
+```
+
+```markdown
+## Advanced Querying
+
+You can use vector search to find similar items:
+
+# Example without context
+table.search([0.1, 0.2, 0.3]).limit(10)
+
+# Issues:
+# - Where did this vector come from?
+# - What does [0.1, 0.2, 0.3] represent?
+# - How do I generate vectors for my data?
+# - Prerequisites (embeddings) not mentioned
+```
+
+```markdown
+## Installation
+
+[Link to "Setting up Python environment" - 404]
+
+You'll need Docker for this tutorial.
+[Mentioned in Step 5, but should be in prerequisites at top]
 ```
 
 ### AI Agent Value:
-Crawl all links, analyze readability scores, flag ambiguous references, suggest structural improvements
+**LLM-as-Judge Approach:**
+- Agent follows tutorial as a human developer would
+- Evaluates at each step: "Were the instructions clear?"
+- Identifies logical gaps and missing prerequisites
+- Scores clarity on structured rubric (0-10)
+- Provides actionable suggestions for improvement
+- Flags terminology inconsistencies across the document
+
+**Traditional Validation:**
+- Crawl and validate all links (404 detection)
+- Check code blocks have language tags
+- Verify sequential numbering in tutorials
+- Analyze readability scores (Flesch-Kincaid, etc.)
+
+**Granular Failure Reporting:**
+- Not just "tutorial is unclear"
+- But "Step 3 in 'Quickstart Guide' references config.yaml not created in prior steps"
+- Include section, subsection, step number, line number
+
+### Success Signals:
+**From Automated Testing:**
+- Clarity score improvement (e.g., 6/10 → 8/10)
+- Reduced number of logical gaps
+- Complete prerequisite coverage
+- Consistent terminology throughout
+
+**From User Behavior (if available):**
+- Reduced Discord "How do I...?" questions
+- Fewer GitHub issues about "unclear documentation"
+- Lower drop-off rates at specific tutorial steps
+- Fewer support requests per documentation page
 
 ---
 

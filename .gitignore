@@ -61,3 +61,4 @@ data/
 # Temporary files
 *.tmp
 .cache/
+local-docs/
