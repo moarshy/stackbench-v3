@@ -170,6 +170,116 @@ CODE_EXAMPLE_VALIDATION_SCHEMA = {
     }
 }
 
+CLARITY_VALIDATION_SCHEMA = {
+    "required_fields": [
+        "validation_id", "validated_at", "source_file", "document_page",
+        "library", "version", "language", "clarity_score", "clarity_issues",
+        "structural_issues", "technical_accessibility", "summary",
+        "processing_time_ms", "warnings"
+    ],
+    "optional_fields": [],
+    "field_types": {
+        "validation_id": str,
+        "validated_at": str,
+        "source_file": str,
+        "document_page": str,
+        "library": str,
+        "version": str,
+        "language": str,
+        "clarity_score": dict,
+        "clarity_issues": list,
+        "structural_issues": list,
+        "technical_accessibility": dict,
+        "summary": dict,
+        "processing_time_ms": int,
+        "warnings": list
+    },
+    "nested_schemas": {
+        "clarity_score": {
+            "required_fields": [
+                "overall_score", "instruction_clarity", "logical_flow",
+                "completeness", "consistency", "prerequisite_coverage",
+                "evaluation_criteria"
+            ],
+            "optional_fields": ["scoring_rationale"],
+            "field_types": {
+                "overall_score": float,
+                "instruction_clarity": float,
+                "logical_flow": float,
+                "completeness": float,
+                "consistency": float,
+                "prerequisite_coverage": float,
+                "evaluation_criteria": dict,
+                "scoring_rationale": (str, type(None))
+            }
+        },
+        "clarity_issues": {
+            "required_fields": [
+                "type", "severity", "line", "section", "message"
+            ],
+            "optional_fields": [
+                "step_number", "suggested_fix", "affected_code", "context_quote"
+            ],
+            "field_types": {
+                "type": str,
+                "severity": str,
+                "line": int,
+                "section": str,
+                "step_number": (int, type(None)),
+                "message": str,
+                "suggested_fix": (str, type(None)),
+                "affected_code": (str, type(None)),
+                "context_quote": (str, type(None))
+            }
+        },
+        "structural_issues": {
+            "required_fields": ["type", "severity", "location", "message"],
+            "optional_fields": ["suggested_fix"],
+            "field_types": {
+                "type": str,
+                "severity": str,
+                "location": str,
+                "message": str,
+                "suggested_fix": (str, type(None))
+            }
+        },
+        "technical_accessibility": {
+            "required_fields": [
+                "broken_links", "missing_alt_text", "code_blocks_without_language",
+                "total_links_checked", "total_images_checked",
+                "total_code_blocks_checked", "all_validated"
+            ],
+            "field_types": {
+                "broken_links": list,
+                "missing_alt_text": list,
+                "code_blocks_without_language": list,
+                "total_links_checked": int,
+                "total_images_checked": int,
+                "total_code_blocks_checked": int,
+                "all_validated": bool
+            }
+        },
+        "summary": {
+            "required_fields": [
+                "total_clarity_issues", "critical_clarity_issues",
+                "warning_clarity_issues", "info_clarity_issues",
+                "total_structural_issues", "critical_structural_issues",
+                "total_technical_issues", "overall_quality_rating"
+            ],
+            "field_types": {
+                "total_clarity_issues": int,
+                "critical_clarity_issues": int,
+                "warning_clarity_issues": int,
+                "info_clarity_issues": int,
+                "total_structural_issues": int,
+                "critical_structural_issues": int,
+                "total_technical_issues": int,
+                "overall_quality_rating": str
+            }
+        }
+    }
+}
+
 
 # ============================================================================
 # VALIDATION FUNCTIONS
@@ -388,13 +498,13 @@ def validate_validation_output_json(
     validation_type: str = "validation_output"
 ) -> tuple[bool, Optional[List[str]]]:
     """
-    Validate API/code validation JSON data directly (not via hook).
+    Validate API/code/clarity validation JSON data directly (not via hook).
 
     Args:
         data: The JSON data to validate
         filename: Name of the file being validated
         log_dir: Optional directory to log validation calls
-        validation_type: Type of validation (api_signature_validation or code_example_validation)
+        validation_type: Type of validation (api_signature_validation, code_example_validation, or clarity_validation)
 
     Returns:
         Tuple of (passed, errors) where passed is bool and errors is list of error messages
@@ -404,6 +514,8 @@ def validate_validation_output_json(
         schema = API_SIGNATURE_VALIDATION_SCHEMA
     elif validation_type == "code_example_validation":
         schema = CODE_EXAMPLE_VALIDATION_SCHEMA
+    elif validation_type == "clarity_validation":
+        schema = CLARITY_VALIDATION_SCHEMA
     else:
         # Default to API schema for backward compatibility
         schema = API_SIGNATURE_VALIDATION_SCHEMA
@@ -568,8 +680,15 @@ def create_validation_output_hook(output_dir: Optional[Path] = None, log_dir: Op
                 return {}
 
             filename = Path(file_path).name
-            if not filename.endswith('_validation.json'):
+            # Check if this is a validation or clarity file
+            if not (filename.endswith('_validation.json') or filename.endswith('_clarity.json')):
                 return {}
+
+            # Determine validation type from filename
+            if filename.endswith('_clarity.json'):
+                validation_type = "clarity_validation"
+            else:
+                validation_type = "validation_output"
 
             # Validate output directory if specified
             if output_dir:
@@ -614,8 +733,18 @@ def create_validation_output_hook(output_dir: Optional[Path] = None, log_dir: Op
                     }
                 }
 
+            # Select schema based on validation type
+            if validation_type == "clarity_validation":
+                schema = CLARITY_VALIDATION_SCHEMA
+            elif validation_type == "api_signature_validation":
+                schema = API_SIGNATURE_VALIDATION_SCHEMA
+            elif validation_type == "code_example_validation":
+                schema = CODE_EXAMPLE_VALIDATION_SCHEMA
+            else:
+                schema = API_SIGNATURE_VALIDATION_SCHEMA  # Default
+
             # Validate structure
-            errors = validate_json_structure(data, VALIDATION_OUTPUT_SCHEMA)
+            errors = validate_json_structure(data, schema)
 
             if errors:
                 error_msg = f"Schema validation failed: {'; '.join(errors[:3])}"

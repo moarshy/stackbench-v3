@@ -17,6 +17,7 @@ from stackbench.agents import (
     DocumentationExtractionAgent,
     APISignatureValidationAgent,
     CodeExampleValidationAgent,
+    DocumentationClarityAgent,
     ExtractionSummary,
 )
 
@@ -105,6 +106,7 @@ class DocumentationValidationPipeline:
         (self.run_context.results_dir / "extraction").mkdir(exist_ok=True)
         (self.run_context.results_dir / "api_validation").mkdir(exist_ok=True)
         (self.run_context.results_dir / "code_validation").mkdir(exist_ok=True)
+        (self.run_context.results_dir / "clarity_validation").mkdir(exist_ok=True)
 
         # Create validation tracking log directory
         (self.run_context.run_dir / "validation_logs").mkdir(exist_ok=True)
@@ -237,6 +239,44 @@ class DocumentationValidationPipeline:
 
         return summary
 
+    async def run_clarity_validation(self) -> Dict[str, Any]:
+        """
+        Run the documentation clarity validation agent.
+
+        Returns:
+            Dict with validation summary statistics
+        """
+        if not self.run_context:
+            raise RuntimeError("Repository not cloned. Call clone_repository() first.")
+
+        print(f"\n📊 Validating documentation clarity...")
+
+        extraction_output = self.run_context.results_dir / "extraction"
+        validation_output = self.run_context.results_dir / "clarity_validation"
+        validation_log_dir = self.run_context.run_dir / "validation_logs"
+
+        agent = DocumentationClarityAgent(
+            extraction_folder=extraction_output,
+            output_folder=validation_output,
+            repository_folder=self.run_context.repo_dir,
+            num_workers=self.num_workers,
+            validation_log_dir=validation_log_dir
+        )
+
+        summary = await agent.analyze_all_documents()
+
+        # Save duration to run context
+        if summary and 'validation_duration_seconds' in summary:
+            self.run_context.clarity_validation_duration_seconds = summary['validation_duration_seconds']
+            self.run_context.save_metadata()
+
+        print(f"✅ Clarity validation complete:")
+        print(f"   Average Score: {summary['average_clarity_score']:.1f}/10")
+        print(f"   Critical Issues: {summary['critical_issues']}")
+        print(f"   Warnings: {summary['warnings']}")
+
+        return summary
+
     async def run(self) -> Dict[str, Any]:
         """
         Run the complete pipeline.
@@ -256,6 +296,9 @@ class DocumentationValidationPipeline:
         # 4. Validate code examples
         code_validation_summary = await self.run_code_validation()
 
+        # 5. Validate clarity & structure
+        clarity_validation_summary = await self.run_clarity_validation()
+
         # Mark as complete
         if self.run_context:
             self.run_context.mark_analysis_completed()
@@ -265,4 +308,5 @@ class DocumentationValidationPipeline:
             "extraction": extraction_summary.model_dump() if hasattr(extraction_summary, 'model_dump') else extraction_summary,
             "api_validation": api_validation_summary,
             "code_validation": code_validation_summary,
+            "clarity_validation": clarity_validation_summary,
         }

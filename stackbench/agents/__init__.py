@@ -20,6 +20,19 @@ from .code_example_validation_agent import (
     DocumentValidationResult,
 )
 
+from .clarity_agent import (
+    DocumentationClarityAgent,
+    DocumentClarityAnalysis,
+    ClarityIssue,
+    StructuralIssue,
+    ClarityScore,
+    TechnicalAccessibility,
+    BrokenLink,
+    MissingAltText,
+    CodeBlockIssue,
+    ClarityValidationSummary,
+)
+
 __all__ = [
     # Extraction
     "DocumentationExtractionAgent",
@@ -35,4 +48,15 @@ __all__ = [
     # Code Example Validation
     "CodeExampleValidationAgent",
     "DocumentValidationResult",
+    # Clarity Validation
+    "DocumentationClarityAgent",
+    "DocumentClarityAnalysis",
+    "ClarityIssue",
+    "StructuralIssue",
+    "ClarityScore",
+    "TechnicalAccessibility",
+    "BrokenLink",
+    "MissingAltText",
+    "CodeBlockIssue",
+    "ClarityValidationSummary",
 ]

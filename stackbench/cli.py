@@ -63,6 +63,7 @@ def run(
     2. Extract API signatures and code examples from documentation
     3. Validate API signatures against the actual library
     4. Validate code examples by executing them
+    5. Validate documentation clarity and structure
 
     Example:
         stackbench run \\
@@ -144,7 +145,7 @@ async def _run_pipeline(
     ) as progress:
 
         # Track each stage
-        task = progress.add_task("[cyan]Initializing pipeline...", total=4)
+        task = progress.add_task("[cyan]Initializing pipeline...", total=5)
 
         # Clone repository
         progress.update(task, description="[cyan]Cloning repository...")
@@ -164,6 +165,11 @@ async def _run_pipeline(
         # Validate code examples
         progress.update(task, description="[cyan]Validating code examples...")
         code_validation_summary = await pipeline.run_code_validation()
+        progress.advance(task)
+
+        # Validate clarity & structure
+        progress.update(task, description="[cyan]Validating documentation clarity...")
+        clarity_validation_summary = await pipeline.run_clarity_validation()
         progress.advance(task)
 
         # Mark pipeline as completed
@@ -227,11 +233,27 @@ async def _run_pipeline(
 
     console.print(code_table)
 
+    # Display clarity validation results
+    console.print("\n[bold]📊 Documentation Clarity[/bold]")
+    clarity_table = Table(show_header=True, header_style="bold cyan")
+    clarity_table.add_column("Metric")
+    clarity_table.add_column("Score/Count", justify="right")
+
+    avg_score = clarity_validation_summary['average_clarity_score']
+    score_color = "green" if avg_score >= 8 else "yellow" if avg_score >= 6 else "red"
+    clarity_table.add_row("Average Clarity Score", f"[{score_color}]{avg_score:.1f}/10[/{score_color}]")
+    clarity_table.add_row("Critical Issues", f"[red]{clarity_validation_summary['critical_issues']}[/red]")
+    clarity_table.add_row("Warnings", f"[yellow]{clarity_validation_summary['warnings']}[/yellow]")
+    clarity_table.add_row("Total Issues", str(clarity_validation_summary['total_issues_found']))
+
+    console.print(clarity_table)
+
     # Display output location
     console.print(f"\n[bold]📁 Results saved to:[/bold] [cyan]{pipeline.run_context.run_dir}[/cyan]")
     console.print(f"   • Extraction: [cyan]{pipeline.run_context.results_dir / 'extraction'}[/cyan]")
     console.print(f"   • API Validation: [cyan]{pipeline.run_context.results_dir / 'api_validation'}[/cyan]")
     console.print(f"   • Code Validation: [cyan]{pipeline.run_context.results_dir / 'code_validation'}[/cyan]")
+    console.print(f"   • Clarity Validation: [cyan]{pipeline.run_context.results_dir / 'clarity_validation'}[/cyan]")
 
 
 @app.command()

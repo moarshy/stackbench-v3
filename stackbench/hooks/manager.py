@@ -30,7 +30,7 @@ class HookManager:
         Initialize the hook manager.
 
         Args:
-            agent_type: Type of agent (extraction, api_validation, code_validation)
+            agent_type: Type of agent (extraction, api_validation, code_validation, clarity_validation)
             logger: Optional AgentLogger for logging hooks
             output_dir: Optional output directory for validation hooks
             validation_log_dir: Optional directory for validation hook tracking logs
@@ -65,7 +65,7 @@ class HookManager:
                 )
             )
 
-        elif self.agent_type in ["api_validation", "code_validation"]:
+        elif self.agent_type in ["api_validation", "code_validation", "clarity_validation"]:
             validation_hook = create_validation_output_hook(
                 output_dir=self.output_dir,
                 log_dir=self.validation_log_dir
@@ -96,7 +96,7 @@ def create_agent_hooks(
     Convenience function to create hooks for an agent.
 
     Args:
-        agent_type: Type of agent (extraction, api_validation, code_validation)
+        agent_type: Type of agent (extraction, api_validation, code_validation, clarity_validation)
         logger: Optional AgentLogger for logging hooks
         output_dir: Optional output directory for validation hooks
         validation_log_dir: Optional directory for validation hook tracking logs
