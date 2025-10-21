@@ -29,6 +29,7 @@ function App() {
   const [ccClarityValidation, setCCClarityValidation] = useState<CCClarityValidationOutput | null>(null);
   const [walkthroughs, setWalkthroughs] = useState<string[]>([]);
   const [walkthroughTitles, setWalkthroughTitles] = useState<Map<string, string>>(new Map());
+  const [walkthroughSources, setWalkthroughSources] = useState<Map<string, string>>(new Map());
   const [selectedWalkthrough, setSelectedWalkthrough] = useState<string | null>(null);
   const [walkthroughData, setWalkthroughData] = useState<WalkthroughData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -112,20 +113,29 @@ function App() {
       const wtIds = await apiService.getWalkthroughs();
       setWalkthroughs(wtIds);
 
-      // Fetch titles for all walkthroughs
+      // Fetch titles and source docs for all walkthroughs
       const titles = new Map<string, string>();
+      const sources = new Map<string, string>();
       for (const wtId of wtIds) {
         try {
           const data = await apiService.getWalkthroughData(wtId);
           if (data) {
             titles.set(wtId, data.walkthrough.walkthrough.title);
+            // Extract source doc from metadata
+            if (data.walkthrough.metadata?.originalDocPath) {
+              // Extract just the filename from the path
+              const sourcePath = data.walkthrough.metadata.originalDocPath;
+              const filename = sourcePath.split('/').pop() || sourcePath;
+              sources.set(wtId, filename);
+            }
           }
         } catch (err) {
-          console.error(`Failed to fetch title for ${wtId}:`, err);
+          console.error(`Failed to fetch metadata for ${wtId}:`, err);
           titles.set(wtId, wtId); // Fallback to ID
         }
       }
       setWalkthroughTitles(titles);
+      setWalkthroughSources(sources);
 
       // Auto-select first walkthrough if available
       if (wtIds.length > 0 && !selectedWalkthrough) {
@@ -381,15 +391,27 @@ function App() {
                       onChange={(e) => setSelectedWalkthrough(e.target.value)}
                       className="w-full px-3 py-2 rounded-md border border-input bg-background text-sm hover:bg-accent transition-colors cursor-pointer"
                     >
-                      {walkthroughs.map((wtId) => (
-                        <option key={wtId} value={wtId}>
-                          {walkthroughTitles.get(wtId) || wtId}
-                        </option>
-                      ))}
+                      {walkthroughs.map((wtId) => {
+                        const title = walkthroughTitles.get(wtId) || wtId;
+                        const source = walkthroughSources.get(wtId);
+                        return (
+                          <option key={wtId} value={wtId}>
+                            {title}{source ? ` • from ${source}` : ''}
+                          </option>
+                        );
+                      })}
                     </select>
                   ) : (
-                    <div className="px-3 py-2 rounded-md border border-input bg-muted text-sm">
-                      {walkthroughTitles.get(selectedWalkthrough || '') || selectedWalkthrough || 'Loading...'}
+                    <div className="space-y-1">
+                      <div className="px-3 py-2 rounded-md border border-input bg-muted text-sm font-medium">
+                        {walkthroughTitles.get(selectedWalkthrough || '') || selectedWalkthrough || 'Loading...'}
+                      </div>
+                      {selectedWalkthrough && walkthroughSources.get(selectedWalkthrough) && (
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground px-1">
+                          <FileText className="h-3 w-3" />
+                          <span>Based on: {walkthroughSources.get(selectedWalkthrough)}</span>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

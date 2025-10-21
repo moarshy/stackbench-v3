@@ -416,12 +416,18 @@ export interface WalkthroughMetadata {
   metadata: any;
 }
 
+export interface WalkthroughExportMetadata {
+  originalDocPath?: string;
+  generatedBy?: string;
+  [key: string]: any;
+}
+
 export interface WalkthroughExport {
   version: string;
   exportedAt: string;
   walkthrough: WalkthroughMetadata;
   steps: WalkthroughStep[];
-  metadata?: any;
+  metadata?: WalkthroughExportMetadata;
 }
 
 export interface GapReport {
