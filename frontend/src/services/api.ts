@@ -5,7 +5,10 @@ import type {
   CCCodeExampleValidationOutput,
   CCClarityValidationOutput,
   DSpyAPISignatureValidationOutput,
-  DSpyCodeExampleValidationOutput
+  DSpyCodeExampleValidationOutput,
+  WalkthroughData,
+  WalkthroughExport,
+  WalkthroughSession
 } from '../types';
 
 interface RepoConfig {
@@ -286,6 +289,73 @@ export class APIService {
       return await response.json();
     } catch (error) {
       console.error('Error fetching DSpy code example validation:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get list of walkthroughs for the current run
+   */
+  async getWalkthroughs(): Promise<string[]> {
+    if (!this.currentRunId) {
+      return [];
+    }
+
+    try {
+      const walkthroughsPath = this.getRunPath('walkthroughs');
+      const response = await fetch(`/api/files?path=${encodeURIComponent(walkthroughsPath)}`);
+      if (!response.ok) {
+        return [];
+      }
+      const folders: string[] = await response.json();
+
+      // Return walkthrough IDs (folder names starting with wt_)
+      return folders.filter(f => f.startsWith('wt_'));
+    } catch (error) {
+      console.error('Error fetching walkthroughs:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get walkthrough data (main walkthrough + session if exists)
+   */
+  async getWalkthroughData(walkthroughId: string): Promise<WalkthroughData | null> {
+    if (!this.currentRunId) {
+      return null;
+    }
+
+    try {
+      // Fetch main walkthrough file
+      const walkthroughPath = this.getRunPath(`walkthroughs/${walkthroughId}/${walkthroughId}.json`);
+      const walkthroughResponse = await fetch(`/api/file?path=${encodeURIComponent(walkthroughPath)}`);
+
+      if (!walkthroughResponse.ok) {
+        return null;
+      }
+
+      const walkthrough: WalkthroughExport = await walkthroughResponse.json();
+
+      // Try to fetch session file (audit results)
+      let session: WalkthroughSession | null = null;
+      try {
+        const sessionPath = this.getRunPath(`walkthroughs/${walkthroughId}/${walkthroughId}_session.json`);
+        const sessionResponse = await fetch(`/api/file?path=${encodeURIComponent(sessionPath)}`);
+
+        if (sessionResponse.ok) {
+          session = await sessionResponse.json();
+        }
+      } catch (sessionError) {
+        // Session file doesn't exist - that's OK, walkthrough might not have been audited
+        console.log('No session file found for', walkthroughId);
+      }
+
+      return {
+        walkthrough,
+        session
+      };
+    } catch (error) {
+      console.error('Error fetching walkthrough data:', error);
       return null;
     }
   }

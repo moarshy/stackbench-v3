@@ -37,7 +37,7 @@ export function RunSelector({ selectedRun, onRunSelect, baseDataDir }: RunSelect
             runInfos.push({
               run_id: runId,
               metadata,
-              display_name: formatRunDisplayName(metadata, runId),
+              display_name: formatRunDisplayName(metadata),
               created_date: createdDate,
             });
           }
@@ -82,7 +82,7 @@ export function RunSelector({ selectedRun, onRunSelect, baseDataDir }: RunSelect
     }
   }, [runs, selectedRun, onRunSelect]);
 
-  const formatRunDisplayName = (metadata: any, runId: string): string => {
+  const formatRunDisplayName = (metadata: any): string => {
     const repoName = metadata.repo_url?.split('/').pop()?.replace('.git', '') || 'Unknown';
     const date = new Date(metadata.created_at);
     const dateStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString();

@@ -383,6 +383,74 @@ export interface CCClarityValidationOutput {
 }
 
 // ============================================================================
+// Walkthrough Types
+// ============================================================================
+
+export interface WalkthroughContentFields {
+  version: string;
+  contentForUser: string;
+  contextForAgent: string;
+  operationsForAgent: string;
+  introductionForAgent: string;
+}
+
+export interface WalkthroughStep {
+  title: string;
+  contentFields: WalkthroughContentFields;
+  displayOrder: number;
+  createdAt: number;
+  updatedAt: number;
+  metadata: any;
+  nextStepReference: number | null;
+}
+
+export interface WalkthroughMetadata {
+  title: string;
+  description: string;
+  type: string;
+  status: string;
+  createdAt: number;
+  updatedAt: number;
+  estimatedDurationMinutes: number;
+  tags: string[];
+  metadata: any;
+}
+
+export interface WalkthroughExport {
+  version: string;
+  exportedAt: string;
+  walkthrough: WalkthroughMetadata;
+  steps: WalkthroughStep[];
+  metadata?: any;
+}
+
+export interface GapReport {
+  step_number: number;
+  step_title: string;
+  gap_type: 'clarity' | 'prerequisite' | 'logical_flow' | 'execution_error' | 'completeness' | 'cross_reference';
+  severity: 'critical' | 'warning' | 'info';
+  description: string;
+  suggested_fix: string | null;
+  context: string | null;
+  timestamp: string;
+}
+
+export interface WalkthroughSession {
+  walkthrough_id: string;
+  current_step: number;
+  total_steps: number;
+  completed_steps: number;
+  is_complete: boolean;
+  gaps: GapReport[];
+  last_updated: string;
+}
+
+export interface WalkthroughData {
+  walkthrough: WalkthroughExport;
+  session: WalkthroughSession | null; // null if not audited yet
+}
+
+// ============================================================================
 // Run Management Types
 // ============================================================================
 

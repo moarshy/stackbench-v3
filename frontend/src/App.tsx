@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
-import { FileText, CheckCircle2, Search, Settings as SettingsIcon, ChevronLeft, ChevronRight, Code, Play, BookOpen } from 'lucide-react';
+import { FileText, CheckCircle2, Search, Settings as SettingsIcon, ChevronLeft, ChevronRight, Code, Play, BookOpen, Route } from 'lucide-react';
 import type {
   ExtractionOutput,
   ValidationOutput,
   CCAPISignatureValidationOutput,
   CCCodeExampleValidationOutput,
   CCClarityValidationOutput,
-  RunInfo as RunInfoType
+  RunInfo as RunInfoType,
+  WalkthroughData
 } from './types';
 import { apiService } from './services/api';
 import { Settings } from './components/Settings';
@@ -14,6 +15,7 @@ import { MarkdownViewer } from './components/MarkdownViewer';
 import { Tabs, TabPanel } from './components/Tabs';
 import { RunSelector } from './components/RunSelector';
 import { RunInfo } from './components/RunInfo';
+import { WalkthroughViewer } from './components/WalkthroughViewer';
 
 function App() {
   const [selectedRun, setSelectedRun] = useState<RunInfoType | null>(null);
@@ -25,15 +27,19 @@ function App() {
   const [ccApiSigValidation, setCCApiSigValidation] = useState<CCAPISignatureValidationOutput | null>(null);
   const [ccCodeExValidation, setCCCodeExValidation] = useState<CCCodeExampleValidationOutput | null>(null);
   const [ccClarityValidation, setCCClarityValidation] = useState<CCClarityValidationOutput | null>(null);
+  const [walkthroughs, setWalkthroughs] = useState<string[]>([]);
+  const [selectedWalkthrough, setSelectedWalkthrough] = useState<string | null>(null);
+  const [walkthroughData, setWalkthroughData] = useState<WalkthroughData | null>(null);
   const [loading, setLoading] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [activeTab, setActiveTab] = useState('extraction');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [docPaneCollapsed, setDocPaneCollapsed] = useState(false);
+  const [viewMode, setViewMode] = useState<'documents' | 'walkthroughs'>('documents');
 
   // Parse URL parameters on mount
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const runId = params.get('run');
     const docName = params.get('doc');
     const tab = params.get('tab');
 
@@ -70,8 +76,10 @@ function App() {
     if (selectedRun) {
       apiService.setRunId(selectedRun.run_id);
       loadDocs();
+      loadWalkthroughs();
       // Reset selected doc when run changes
       setSelectedDoc(null);
+      setSelectedWalkthrough(null);
     }
   }, [selectedRun]);
 
@@ -82,12 +90,32 @@ function App() {
     }
   }, [selectedDoc, selectedRun]);
 
+  // Load walkthrough data when walkthrough is selected
+  useEffect(() => {
+    if (selectedWalkthrough && selectedRun) {
+      loadWalkthroughData(selectedWalkthrough);
+    }
+  }, [selectedWalkthrough, selectedRun]);
+
   const loadDocs = async () => {
     try {
       const files = await apiService.getDocumentationFiles();
       setDocs(files);
     } catch (error) {
       console.error('Failed to load documentation files:', error);
+    }
+  };
+
+  const loadWalkthroughs = async () => {
+    try {
+      const wtIds = await apiService.getWalkthroughs();
+      setWalkthroughs(wtIds);
+      // Auto-select first walkthrough if available
+      if (wtIds.length > 0 && !selectedWalkthrough) {
+        setSelectedWalkthrough(wtIds[0]);
+      }
+    } catch (error) {
+      console.error('Failed to load walkthroughs:', error);
     }
   };
 
@@ -118,6 +146,18 @@ function App() {
       setCCClarityValidation(ccClarityData);
     } catch (error) {
       console.error('Failed to load document data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadWalkthroughData = async (walkthroughId: string) => {
+    setLoading(true);
+    try {
+      const data = await apiService.getWalkthroughData(walkthroughId);
+      setWalkthroughData(data);
+    } catch (error) {
+      console.error('Failed to load walkthrough data:', error);
     } finally {
       setLoading(false);
     }
@@ -217,8 +257,41 @@ function App() {
               <div className="flex-1">
                 <h1 className="text-2xl font-bold">StackBench Documentation Validator</h1>
                 <p className="text-sm text-muted-foreground">
-                  View documentation, extraction results, and validation
+                  {viewMode === 'documents'
+                    ? 'View documentation, extraction results, and validation'
+                    : 'View walkthrough tutorials and audit results'}
                 </p>
+              </div>
+
+              {/* Mode Toggle */}
+              <div className="flex items-center gap-1 p-1 bg-muted rounded-lg">
+                <button
+                  onClick={() => setViewMode('documents')}
+                  className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${
+                    viewMode === 'documents'
+                      ? 'bg-background shadow-sm text-foreground'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <FileText className="h-4 w-4" />
+                  Documents
+                </button>
+                <button
+                  onClick={() => setViewMode('walkthroughs')}
+                  className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${
+                    viewMode === 'walkthroughs'
+                      ? 'bg-background shadow-sm text-foreground'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <Route className="h-4 w-4" />
+                  Walkthroughs
+                  {walkthroughs.length > 0 && (
+                    <span className="px-1.5 py-0.5 rounded-full bg-primary text-primary-foreground text-xs">
+                      {walkthroughs.length}
+                    </span>
+                  )}
+                </button>
               </div>
             </div>
             <div className="flex items-center gap-4">
@@ -245,7 +318,7 @@ function App() {
           </div>
         </header>
 
-        {/* Two-Pane Layout */}
+        {/* Content Area - Documents or Walkthroughs */}
         {!selectedRun ? (
           <div className="flex-1 flex items-center justify-center text-center p-6">
             <div>
@@ -257,7 +330,65 @@ function App() {
               </p>
             </div>
           </div>
+        ) : viewMode === 'walkthroughs' ? (
+          /* WALKTHROUGHS MODE */
+          <div className="flex-1 overflow-hidden">
+            {walkthroughs.length === 0 ? (
+              <div className="flex-1 flex items-center justify-center text-center p-6">
+                <div>
+                  <Route className="h-16 w-16 mx-auto text-muted-foreground mb-4 opacity-50" />
+                  <h3 className="text-xl font-semibold mb-2">No Walkthroughs Available</h3>
+                  <p className="text-sm text-muted-foreground max-w-md mx-auto mb-4">
+                    This run doesn't have any walkthroughs yet. Generate a walkthrough from documentation:
+                  </p>
+                  <code className="block px-3 py-2 bg-muted rounded text-xs">
+                    stackbench walkthrough generate --repo ... --doc-path docs/quickstart.md
+                  </code>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col h-full">
+                {/* Walkthrough selector if multiple walkthroughs */}
+                {walkthroughs.length > 1 && (
+                  <div className="p-4 border-b border-border bg-card">
+                    <label className="block text-sm font-medium mb-2 flex items-center gap-2">
+                      <Route className="h-4 w-4" />
+                      Select Walkthrough ({walkthroughs.length} available)
+                    </label>
+                    <select
+                      value={selectedWalkthrough || ''}
+                      onChange={(e) => setSelectedWalkthrough(e.target.value)}
+                      className="w-full px-3 py-2 rounded-md border border-input bg-background text-sm hover:bg-accent transition-colors cursor-pointer"
+                    >
+                      {walkthroughs.map((wtId) => (
+                        <option key={wtId} value={wtId}>
+                          {walkthroughData?.walkthrough.walkthrough.title || wtId}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                {/* Walkthrough viewer */}
+                <div className="flex-1 overflow-hidden">
+                  {walkthroughData ? (
+                    <WalkthroughViewer data={walkthroughData} />
+                  ) : (
+                    <div className="flex items-center justify-center h-full">
+                      <div className="text-center p-6">
+                        <Route className="h-12 w-12 mx-auto text-muted-foreground mb-3 opacity-50" />
+                        <p className="text-sm text-muted-foreground">
+                          {loading ? 'Loading walkthrough...' : 'Select a walkthrough to view details'}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         ) : !selectedDoc ? (
+          /* DOCUMENTS MODE - No document selected */
           <div className="flex-1 flex items-center justify-center text-center p-6">
             <div>
               <FileText className="h-16 w-16 mx-auto text-muted-foreground mb-4" />
@@ -270,12 +401,25 @@ function App() {
         ) : (
           <div className="flex-1 flex overflow-hidden">
             {/* Left Pane - Documentation Viewer */}
-            <div className="flex-1 border-r border-border overflow-auto">
+            <div
+              className={`border-r border-border overflow-auto transition-all duration-300 ${
+                docPaneCollapsed ? 'w-0 opacity-0' : 'flex-1 opacity-100'
+              }`}
+            >
               <div className="p-6">
-                <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                  <FileText className="h-5 w-5" />
-                  Documentation
-                </h3>
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold flex items-center gap-2">
+                    <FileText className="h-5 w-5" />
+                    Documentation
+                  </h3>
+                  <button
+                    onClick={() => setDocPaneCollapsed(true)}
+                    className="p-1.5 rounded-md hover:bg-accent hover:text-accent-foreground transition-colors"
+                    title="Collapse documentation pane"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </button>
+                </div>
                 {loading ? (
                   <div className="text-sm text-muted-foreground">Loading...</div>
                 ) : (
@@ -288,7 +432,18 @@ function App() {
             </div>
 
             {/* Right Pane - Results with Tabs */}
-            <div className="flex-1 flex flex-col overflow-hidden">
+            <div className="flex-1 flex flex-col overflow-hidden relative">
+              {/* Expand button when doc pane is collapsed */}
+              {docPaneCollapsed && (
+                <button
+                  onClick={() => setDocPaneCollapsed(false)}
+                  className="absolute left-2 top-2 z-10 p-2 rounded-md bg-background border border-border shadow-sm hover:bg-accent hover:shadow-md transition-all flex items-center gap-2"
+                  title="Expand documentation pane"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                  <span className="text-sm font-medium">Show Docs</span>
+                </button>
+              )}
               <Tabs tabs={tabs} activeTab={activeTab} onTabChange={setActiveTab}>
                 {/* Extraction Tab */}
                 <TabPanel value="extraction" activeTab={activeTab}>
