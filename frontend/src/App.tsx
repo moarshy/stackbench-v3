@@ -175,13 +175,16 @@ function App() {
                 <button
                   key={doc}
                   onClick={() => setSelectedDoc(doc)}
-                  className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors cursor-pointer ${
+                  className={`w-full text-left px-3 py-2 rounded-md text-sm transition-all cursor-pointer flex items-center gap-2 ${
                     selectedDoc === doc
-                      ? 'bg-primary text-primary-foreground'
+                      ? 'bg-primary text-primary-foreground font-medium shadow-sm ring-2 ring-primary/20'
                       : 'hover:bg-accent hover:text-accent-foreground'
                   }`}
                 >
-                  {doc}
+                  {selectedDoc === doc && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-primary-foreground flex-shrink-0"></span>
+                  )}
+                  <span className="truncate">{doc}</span>
                 </button>
               ))}
             </div>
