@@ -687,6 +687,14 @@ def create_validation_output_hook(output_dir: Optional[Path] = None, log_dir: Op
             # Determine validation type from filename
             if filename.endswith('_clarity.json'):
                 validation_type = "clarity_validation"
+            elif filename.endswith('_validation.json'):
+                # Infer from parent folder or filename pattern
+                if 'api' in str(file_path).lower() or 'signature' in filename.lower():
+                    validation_type = "api_signature_validation"
+                elif 'code' in str(file_path).lower() or 'example' in filename.lower():
+                    validation_type = "code_example_validation"
+                else:
+                    validation_type = "validation_output"  # Generic fallback
             else:
                 validation_type = "validation_output"
 
@@ -701,7 +709,7 @@ def create_validation_output_hook(output_dir: Optional[Path] = None, log_dir: Op
 
                     # Log validation failure
                     if log_dir:
-                        log_validation_call(log_dir, "validation_output", filename, False, reason=reason)
+                        log_validation_call(log_dir, validation_type, filename, False, reason=reason)
 
                     return {
                         'hookSpecificOutput': {
@@ -723,7 +731,7 @@ def create_validation_output_hook(output_dir: Optional[Path] = None, log_dir: Op
 
                 # Log validation failure
                 if log_dir:
-                    log_validation_call(log_dir, "validation_output", filename, False, reason=reason)
+                    log_validation_call(log_dir, validation_type, filename, False, reason=reason)
 
                 return {
                     'hookSpecificOutput': {
@@ -751,7 +759,7 @@ def create_validation_output_hook(output_dir: Optional[Path] = None, log_dir: Op
 
                 # Log validation failure
                 if log_dir:
-                    log_validation_call(log_dir, "validation_output", filename, False, errors=errors, reason="Schema validation failed")
+                    log_validation_call(log_dir, validation_type, filename, False, errors=errors, reason="Schema validation failed")
 
                 return {
                     'hookSpecificOutput': {
@@ -763,7 +771,7 @@ def create_validation_output_hook(output_dir: Optional[Path] = None, log_dir: Op
 
             # Validation passed - log success
             if log_dir:
-                log_validation_call(log_dir, "validation_output", filename, True)
+                log_validation_call(log_dir, validation_type, filename, True)
 
             return {}  # Validation passed
 
@@ -771,7 +779,8 @@ def create_validation_output_hook(output_dir: Optional[Path] = None, log_dir: Op
             # Log error but don't block
             print(f"⚠️  Validation hook error: {e}")
             if log_dir:
-                log_validation_call(log_dir, "validation_output", filename or "unknown", False, reason=f"Hook error: {e}")
+                validation_type = "validation_output"  # Default for error cases
+                log_validation_call(log_dir, validation_type, filename or "unknown", False, reason=f"Hook error: {e}")
             return {}
 
     return validation_output_hook
