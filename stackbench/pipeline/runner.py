@@ -9,8 +9,10 @@ This module coordinates:
 """
 
 import uuid
+import asyncio
 from pathlib import Path
 from typing import Optional, List, Dict, Any
+from datetime import datetime
 
 from stackbench.repository import RepositoryManager, RunContext
 from stackbench.agents import (
@@ -113,191 +115,239 @@ class DocumentationValidationPipeline:
 
         return self.run_context
 
-    async def run_extraction(self) -> ExtractionSummary:
+
+    async def _estimate_and_sort_documents(self, md_files: List[Path]) -> List[Path]:
         """
-        Run the documentation extraction agent.
+        Estimate document processing time and sort longest-first.
+
+        Uses file size as a proxy for processing time (larger docs take longer).
+
+        Args:
+            md_files: List of markdown file paths
 
         Returns:
-            ExtractionSummary with all extracted signatures and examples
+            List of paths sorted by size (largest first)
         """
-        if not self.run_context:
-            raise RuntimeError("Repository not cloned. Call clone_repository() first.")
+        doc_sizes = []
+        for doc in md_files:
+            size = doc.stat().st_size
+            doc_sizes.append((doc, size))
 
-        print(f"\n📝 Extracting API signatures and code examples...")
-        print(f"   Library: {self.library_name} v{self.library_version}")
-        print(f"   Docs folder: {self.docs_folder}")
+        # Sort by size descending (largest first)
+        doc_sizes.sort(key=lambda x: x[1], reverse=True)
 
-        extraction_output = self.run_context.results_dir / "extraction"
-        validation_log_dir = self.run_context.run_dir / "validation_logs"
+        sorted_docs = [doc for doc, size in doc_sizes]
 
-        agent = DocumentationExtractionAgent(
+        print(f"\n📊 Document processing order (by size):")
+        for i, (doc, size) in enumerate(doc_sizes[:10], 1):  # Show first 10
+            kb = size / 1024
+            print(f"   {i}. {doc.name:40s} ({kb:7.1f} KB)")
+        if len(doc_sizes) > 10:
+            print(f"   ... and {len(doc_sizes) - 10} more")
+
+        return sorted_docs
+
+    async def _process_document_end_to_end(self, doc_file: Path) -> Dict[str, Any]:
+        """
+        Run complete validation pipeline for a single document.
+
+        Executes all four stages (extraction, API validation, code validation, clarity)
+        for one document. If extraction fails, downstream stages are skipped.
+
+        Args:
+            doc_file: Path to markdown file to process
+
+        Returns:
+            Dict with results from all stages
+        """
+        doc_name = doc_file.stem
+        start_time = datetime.now()
+
+        # 1. EXTRACTION
+        print(f"   📝 Extracting: {doc_file.name}")
+        extraction_agent = DocumentationExtractionAgent(
             docs_folder=self.docs_folder,
-            output_folder=extraction_output,
+            output_folder=self.run_context.results_dir / "extraction",
             repo_root=self.run_context.repo_dir,
             default_version=self.library_version,
-            num_workers=self.num_workers,
-            validation_log_dir=validation_log_dir
+            num_workers=1,
+            validation_log_dir=self.run_context.run_dir / "validation_logs"
         )
 
-        summary = await agent.process_all_documents(library_name=self.library_name)
-
-        # Save extraction metrics to run context
-        self.run_context.num_workers = self.num_workers
-        self.run_context.extraction_duration_seconds = summary.extraction_duration_seconds
-        self.run_context.save_metadata()
-
-        print(f"✅ Extraction complete:")
-        print(f"   Documents: {summary.processed}/{summary.total_documents}")
-        print(f"   Signatures: {summary.total_signatures}")
-        print(f"   Examples: {summary.total_examples}")
-
-        return summary
-
-    async def run_api_validation(self) -> Dict[str, Any]:
-        """
-        Run the API signature validation agent.
-
-        Returns:
-            Dict with validation summary statistics
-        """
-        if not self.run_context:
-            raise RuntimeError("Repository not cloned. Call clone_repository() first.")
-
-        print(f"\n🔍 Validating API signatures against {self.library_name} v{self.library_version}...")
-
-        extraction_output = self.run_context.results_dir / "extraction"
-        validation_output = self.run_context.results_dir / "api_validation"
-        validation_log_dir = self.run_context.run_dir / "validation_logs"
-
-        agent = APISignatureValidationAgent(
-            extraction_folder=extraction_output,
-            output_folder=validation_output,
-            num_workers=self.num_workers,
-            validation_log_dir=validation_log_dir
+        extraction_result = await extraction_agent.process_document(
+            doc_file,
+            library_name=self.library_name
         )
 
-        api_summary = await agent.validate_all_documents()
-
-        # Save API validation duration to run context
-        if api_summary and 'validation_duration_seconds' in api_summary:
-            self.run_context.api_validation_duration_seconds = api_summary['validation_duration_seconds']
-            self.run_context.save_metadata()
-
-        # Load and return summary
-        summary_file = validation_output / "validation_summary.json"
-        if summary_file.exists():
-            import json
-            with open(summary_file, 'r') as f:
-                summary = json.load(f)
-            print(f"✅ API validation complete:")
-            print(f"   Valid: {summary['total_valid']}")
-            print(f"   Invalid: {summary['total_invalid']}")
-            print(f"   Not Found: {summary['total_not_found']}")
-            return summary
-        else:
-            print(f"⚠️  No validation summary found")
+        # If extraction fails, skip downstream validation
+        if not extraction_result:
             return {
-                "total_signatures": 0,
-                "total_valid": 0,
-                "total_invalid": 0,
-                "total_not_found": 0
+                "document": doc_name,
+                "status": "failed",
+                "stage_failed": "extraction",
+                "extraction": None,
+                "api_validation": {"status": "skipped", "reason": "extraction failed"},
+                "code_validation": {"status": "skipped", "reason": "extraction failed"},
+                "clarity_validation": {"status": "skipped", "reason": "extraction failed"}
             }
 
-    async def run_code_validation(self) -> Dict[str, Any]:
-        """
-        Run the code example validation agent.
+        # 2. API VALIDATION
+        print(f"   🔍 API validation: {doc_file.name}")
+        extraction_file = self.run_context.results_dir / "extraction" / f"{doc_name}_analysis.json"
 
-        Returns:
-            Dict with validation summary statistics
-        """
-        if not self.run_context:
-            raise RuntimeError("Repository not cloned. Call clone_repository() first.")
-
-        print(f"\n📝 Validating code examples...")
-
-        extraction_output = self.run_context.results_dir / "extraction"
-        validation_output = self.run_context.results_dir / "code_validation"
-        validation_log_dir = self.run_context.run_dir / "validation_logs"
-
-        agent = CodeExampleValidationAgent(
-            extraction_output_folder=extraction_output,
-            validation_output_folder=validation_output,
-            num_workers=self.num_workers,
-            validation_log_dir=validation_log_dir
+        api_agent = APISignatureValidationAgent(
+            extraction_folder=self.run_context.results_dir / "extraction",
+            output_folder=self.run_context.results_dir / "api_validation",
+            num_workers=1,
+            validation_log_dir=self.run_context.run_dir / "validation_logs"
         )
 
-        summary = await agent.validate_all_documents()
+        api_result = await api_agent.validate_document(extraction_file)
 
-        # Save code validation duration to run context
-        if summary and 'validation_duration_seconds' in summary:
-            self.run_context.code_validation_duration_seconds = summary['validation_duration_seconds']
-            self.run_context.save_metadata()
+        # 3. CODE VALIDATION
+        print(f"   🧪 Code validation: {doc_file.name}")
+        code_agent = CodeExampleValidationAgent(
+            extraction_output_folder=self.run_context.results_dir / "extraction",
+            validation_output_folder=self.run_context.results_dir / "code_validation",
+            num_workers=1,
+            validation_log_dir=self.run_context.run_dir / "validation_logs"
+        )
 
-        print(f"✅ Code validation complete:")
-        print(f"   Successful: {summary['successful']}")
-        print(f"   Failed: {summary['failed']}")
+        code_result = await code_agent.validate_document(extraction_file)
 
-        return summary
-
-    async def run_clarity_validation(self) -> Dict[str, Any]:
-        """
-        Run the documentation clarity validation agent.
-
-        Returns:
-            Dict with validation summary statistics
-        """
-        if not self.run_context:
-            raise RuntimeError("Repository not cloned. Call clone_repository() first.")
-
-        print(f"\n📊 Validating documentation clarity...")
-
-        extraction_output = self.run_context.results_dir / "extraction"
-        validation_output = self.run_context.results_dir / "clarity_validation"
-        validation_log_dir = self.run_context.run_dir / "validation_logs"
-
-        agent = DocumentationClarityAgent(
-            extraction_folder=extraction_output,
-            output_folder=validation_output,
+        # 4. CLARITY VALIDATION (requires extraction + API + Code)
+        print(f"   📊 Clarity validation: {doc_file.name}")
+        clarity_agent = DocumentationClarityAgent(
+            extraction_folder=self.run_context.results_dir / "extraction",
+            output_folder=self.run_context.results_dir / "clarity_validation",
             repository_folder=self.run_context.repo_dir,
-            num_workers=self.num_workers,
-            validation_log_dir=validation_log_dir
+            num_workers=1,
+            validation_log_dir=self.run_context.run_dir / "validation_logs"
         )
 
-        summary = await agent.analyze_all_documents()
+        clarity_result = await clarity_agent.analyze_document(extraction_file)
 
-        # Save duration to run context
-        if summary and 'validation_duration_seconds' in summary:
-            self.run_context.clarity_validation_duration_seconds = summary['validation_duration_seconds']
-            self.run_context.save_metadata()
+        duration = (datetime.now() - start_time).total_seconds()
+        print(f"   ✅ Completed {doc_file.name} in {duration:.1f}s")
 
-        print(f"✅ Clarity validation complete:")
-        print(f"   Average Score: {summary['average_clarity_score']:.1f}/10")
-        print(f"   Critical Issues: {summary['critical_issues']}")
-        print(f"   Warnings: {summary['warnings']}")
+        return {
+            "document": doc_name,
+            "status": "success",
+            "duration_seconds": duration,
+            "extraction": extraction_result,
+            "api_validation": api_result,
+            "code_validation": code_result,
+            "clarity_validation": clarity_result
+        }
 
-        return summary
+    async def _worker(self, worker_id: int, document_queue: asyncio.Queue) -> List[Dict[str, Any]]:
+        """
+        Worker that processes documents from queue until empty.
+
+        Each worker takes documents from the shared queue and runs the full
+        pipeline (extract → API → code → clarity) for each document.
+
+        Args:
+            worker_id: Unique worker identifier (0 to num_workers-1)
+            document_queue: Shared queue of documents to process
+
+        Returns:
+            List of results for all documents processed by this worker
+        """
+        worker_results = []
+
+        while True:
+            try:
+                # Get next document (non-blocking with timeout)
+                doc_file = await asyncio.wait_for(
+                    document_queue.get(),
+                    timeout=0.1
+                )
+            except asyncio.TimeoutError:
+                # Queue is empty
+                break
+
+            try:
+                print(f"\n🔄 Worker {worker_id}: Processing {doc_file.name}")
+
+                # Run full pipeline for this document
+                result = await self._process_document_end_to_end(doc_file)
+
+                worker_results.append(result)
+
+            except Exception as e:
+                print(f"❌ Worker {worker_id}: Failed {doc_file.name}: {e}")
+                import traceback
+                traceback.print_exc()
+
+                worker_results.append({
+                    "document": doc_file.stem,
+                    "status": "failed",
+                    "error": str(e)
+                })
+
+            finally:
+                document_queue.task_done()
+
+        print(f"🏁 Worker {worker_id}: No more documents, shutting down")
+        return worker_results
 
     async def run(self) -> Dict[str, Any]:
         """
-        Run the complete pipeline.
+        Run the complete pipeline using worker pool pattern.
+
+        Each worker processes documents end-to-end (extract → API → code → clarity).
+        Documents are sorted longest-first to minimize idle time at end.
 
         Returns:
             Dict with all summaries
         """
+        overall_start = datetime.now()
+
         # 1. Clone repository
         await self.clone_repository()
 
-        # 2. Extract documentation
-        extraction_summary = await self.run_extraction()
+        # 2. Find all markdown files
+        md_files = self.repo_manager.find_markdown_files(
+            self.run_context,
+            include_folders=self.include_folders
+        )
 
-        # 3. Validate API signatures
-        api_validation_summary = await self.run_api_validation()
+        if not md_files:
+            print("❌ No markdown files found")
+            return {
+                "run_id": self.run_id,
+                "status": "failed",
+                "reason": "no markdown files found"
+            }
 
-        # 4. Validate code examples
-        code_validation_summary = await self.run_code_validation()
+        # 3. Sort documents by size (longest first)
+        sorted_docs = await self._estimate_and_sort_documents(md_files)
 
-        # 5. Validate clarity & structure
-        clarity_validation_summary = await self.run_clarity_validation()
+        # 4. Create shared document queue
+        document_queue = asyncio.Queue()
+        for doc in sorted_docs:
+            await document_queue.put(doc)
+
+        print(f"\n🚀 Launching {self.num_workers} workers to process {len(sorted_docs)} documents\n")
+
+        # 5. Launch worker pool
+        workers = [
+            self._worker(worker_id, document_queue)
+            for worker_id in range(self.num_workers)
+        ]
+
+        # 6. Wait for all workers to complete
+        worker_results = await asyncio.gather(*workers)
+
+        # 7. Flatten results from all workers
+        all_results = [r for worker in worker_results for r in worker]
+
+        overall_duration = (datetime.now() - overall_start).total_seconds()
+
+        print(f"\n✨ Pipeline complete in {overall_duration:.1f}s ({overall_duration/60:.1f}m)")
+        print(f"   Documents processed: {len([r for r in all_results if r['status'] == 'success'])}/{len(all_results)}")
+        print(f"   Failed: {len([r for r in all_results if r['status'] == 'failed'])}")
 
         # Mark as complete
         if self.run_context:
@@ -305,8 +355,10 @@ class DocumentationValidationPipeline:
 
         return {
             "run_id": self.run_id,
-            "extraction": extraction_summary.model_dump() if hasattr(extraction_summary, 'model_dump') else extraction_summary,
-            "api_validation": api_validation_summary,
-            "code_validation": code_validation_summary,
-            "clarity_validation": clarity_validation_summary,
+            "duration_seconds": overall_duration,
+            "num_workers": self.num_workers,
+            "total_documents": len(all_results),
+            "successful": len([r for r in all_results if r['status'] == 'success']),
+            "failed": len([r for r in all_results if r['status'] == 'failed']),
+            "results": all_results
         }

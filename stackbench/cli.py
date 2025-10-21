@@ -52,7 +52,7 @@ def run(
         5,
         "--num-workers",
         "-w",
-        help="Number of parallel workers for extraction (default: 5)",
+        help="Number of parallel workers (default: 5)",
     ),
 ):
     """
@@ -65,6 +65,9 @@ def run(
     4. Validate code examples by executing them
     5. Validate documentation clarity and structure
 
+    Each worker processes one document end-to-end (extract → API → code → clarity).
+    Documents are sorted longest-first to minimize idle worker time.
+
     Example:
         stackbench run \\
             --repo https://github.com/lancedb/lancedb \\
@@ -72,7 +75,7 @@ def run(
             --include-folders docs/src/python \\
             --library lancedb \\
             --version 0.25.2 \\
-            --output ./my-results
+            --num-workers 5
     """
 
     # Parse include_folders
@@ -121,6 +124,7 @@ async def _run_pipeline(
     version: str,
     output_dir: Path,
     num_workers: int,
+    use_worker_pool: bool = True,
 ):
     """Run the validation pipeline with progress tracking."""
 
@@ -135,7 +139,31 @@ async def _run_pipeline(
         num_workers=num_workers,
     )
 
-    # Run pipeline with progress tracking
+    if use_worker_pool:
+        # New worker pool mode - simpler output
+        result = await pipeline.run_with_worker_pool()
+
+        # Display summary (worker pool doesn't have detailed summaries yet)
+        console.print("\n")
+        console.print(Panel.fit(
+            "[bold green]✨ Pipeline Complete![/bold green]",
+            border_style="green"
+        ))
+
+        console.print(f"\n[bold]📊 Results[/bold]")
+        console.print(f"   Duration: [cyan]{result['duration_seconds']:.1f}s ({result['duration_seconds']/60:.1f}m)[/cyan]")
+        console.print(f"   Workers: [cyan]{result['num_workers']}[/cyan]")
+        console.print(f"   Documents: [green]{result['successful']}[/green] successful, [red]{result['failed']}[/red] failed")
+
+        console.print(f"\n[bold]📁 Results saved to:[/bold] [cyan]{pipeline.run_context.run_dir}[/cyan]")
+        console.print(f"   • Extraction: [cyan]{pipeline.run_context.results_dir / 'extraction'}[/cyan]")
+        console.print(f"   • API Validation: [cyan]{pipeline.run_context.results_dir / 'api_validation'}[/cyan]")
+        console.print(f"   • Code Validation: [cyan]{pipeline.run_context.results_dir / 'code_validation'}[/cyan]")
+        console.print(f"   • Clarity Validation: [cyan]{pipeline.run_context.results_dir / 'clarity_validation'}[/cyan]")
+
+        return
+
+    # Legacy sequential mode with progress tracking
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),

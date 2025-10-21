@@ -533,6 +533,53 @@ class DocumentationExtractionAgent:
                     processing_time_ms=processing_time
                 )
     
+    async def process_document(
+        self,
+        doc_path: Path,
+        library_name: Optional[str] = None
+    ) -> Optional[DocumentAnalysis]:
+        """
+        Process a single markdown document (extract signatures and examples).
+
+        This method extracts API signatures and code examples from a single document,
+        validates the output, and saves it to disk. Designed for use in worker pool patterns.
+
+        Args:
+            doc_path: Path to markdown file to process
+            library_name: Primary library name to extract (if None, will be auto-detected)
+
+        Returns:
+            DocumentAnalysis if successful, None if extraction failed
+        """
+        try:
+            analysis = await self.analyze_document(doc_path, library_name)
+
+            # Validate JSON before saving
+            from stackbench.hooks import validate_extraction_json
+
+            analysis_dict = json.loads(analysis.model_dump_json())
+            filename = f"{doc_path.stem}_analysis.json"
+
+            passed, errors = validate_extraction_json(
+                analysis_dict,
+                filename,
+                self.validation_log_dir
+            )
+
+            if not passed:
+                print(f"⚠️  {doc_path.name} - Validation failed: {errors[:2]}")
+
+            # Save individual result
+            output_file = self.output_folder / filename
+            with open(output_file, 'w', encoding='utf-8') as f:
+                f.write(analysis.model_dump_json(indent=2))
+
+            return analysis
+
+        except Exception as e:
+            print(f"❌ {doc_path.name} - Extraction failed: {e}")
+            return None
+
     async def _process_document_with_save(
         self,
         doc_path: Path,
@@ -543,32 +590,15 @@ class DocumentationExtractionAgent:
         """Process a single document with semaphore control and save results."""
         async with semaphore:
             try:
-                analysis = await self.analyze_document(doc_path, library_name)
+                analysis = await self.process_document(doc_path, library_name)
 
-                # Validate JSON before saving
-                from stackbench.hooks import validate_extraction_json
-
-                analysis_dict = json.loads(analysis.model_dump_json())
-                filename = f"{doc_path.stem}_analysis.json"
-
-                passed, errors = validate_extraction_json(
-                    analysis_dict,
-                    filename,
-                    self.validation_log_dir
-                )
-
-                if not passed:
-                    print(f"⚠️  [{progress['completed']+1}/{progress['total']}] {doc_path.name} - Validation failed: {errors[:2]}")
-
-                # Save individual result
-                output_file = self.output_folder / filename
-                with open(output_file, 'w', encoding='utf-8') as f:
-                    f.write(analysis.model_dump_json(indent=2))
-
-                progress['completed'] += 1
-                sigs = analysis.total_signatures
-                exs = analysis.total_examples
-                print(f"✅ [{progress['completed']}/{progress['total']}] {doc_path.name} - {sigs} signatures, {exs} examples")
+                if analysis:
+                    progress['completed'] += 1
+                    sigs = analysis.total_signatures
+                    exs = analysis.total_examples
+                    print(f"✅ [{progress['completed']}/{progress['total']}] {doc_path.name} - {sigs} signatures, {exs} examples")
+                else:
+                    progress['completed'] += 1
 
                 return analysis
 
