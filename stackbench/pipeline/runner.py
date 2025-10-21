@@ -14,6 +14,9 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
+from rich.console import Console
+
 from stackbench.repository import RepositoryManager, RunContext
 from stackbench.agents import (
     DocumentationExtractionAgent,
@@ -22,6 +25,8 @@ from stackbench.agents import (
     DocumentationClarityAgent,
     ExtractionSummary,
 )
+
+console = Console()
 
 
 class DocumentationValidationPipeline:
@@ -164,7 +169,6 @@ class DocumentationValidationPipeline:
         start_time = datetime.now()
 
         # 1. EXTRACTION
-        print(f"   📝 Extracting: {doc_file.name}")
         extraction_agent = DocumentationExtractionAgent(
             docs_folder=self.docs_folder,
             output_folder=self.run_context.results_dir / "extraction",
@@ -192,7 +196,6 @@ class DocumentationValidationPipeline:
             }
 
         # 2. API VALIDATION
-        print(f"   🔍 API validation: {doc_file.name}")
         extraction_file = self.run_context.results_dir / "extraction" / f"{doc_name}_analysis.json"
 
         api_agent = APISignatureValidationAgent(
@@ -205,7 +208,6 @@ class DocumentationValidationPipeline:
         api_result = await api_agent.validate_document(extraction_file)
 
         # 3. CODE VALIDATION
-        print(f"   🧪 Code validation: {doc_file.name}")
         code_agent = CodeExampleValidationAgent(
             extraction_output_folder=self.run_context.results_dir / "extraction",
             validation_output_folder=self.run_context.results_dir / "code_validation",
@@ -216,7 +218,6 @@ class DocumentationValidationPipeline:
         code_result = await code_agent.validate_document(extraction_file)
 
         # 4. CLARITY VALIDATION (requires extraction + API + Code)
-        print(f"   📊 Clarity validation: {doc_file.name}")
         clarity_agent = DocumentationClarityAgent(
             extraction_folder=self.run_context.results_dir / "extraction",
             output_folder=self.run_context.results_dir / "clarity_validation",
@@ -228,7 +229,6 @@ class DocumentationValidationPipeline:
         clarity_result = await clarity_agent.analyze_document(extraction_file)
 
         duration = (datetime.now() - start_time).total_seconds()
-        print(f"   ✅ Completed {doc_file.name} in {duration:.1f}s")
 
         return {
             "document": doc_name,
@@ -240,9 +240,15 @@ class DocumentationValidationPipeline:
             "clarity_validation": clarity_result
         }
 
-    async def _worker(self, worker_id: int, document_queue: asyncio.Queue) -> List[Dict[str, Any]]:
+    async def _worker_with_progress(
+        self,
+        worker_id: int,
+        document_queue: asyncio.Queue,
+        progress: Progress,
+        overall_task
+    ) -> List[Dict[str, Any]]:
         """
-        Worker that processes documents from queue until empty.
+        Worker that processes documents from queue with progress updates.
 
         Each worker takes documents from the shared queue and runs the full
         pipeline (extract → API → code → clarity) for each document.
@@ -250,6 +256,8 @@ class DocumentationValidationPipeline:
         Args:
             worker_id: Unique worker identifier (0 to num_workers-1)
             document_queue: Shared queue of documents to process
+            progress: Rich Progress instance for updates
+            overall_task: Progress task ID for overall completion
 
         Returns:
             List of results for all documents processed by this worker
@@ -268,15 +276,16 @@ class DocumentationValidationPipeline:
                 break
 
             try:
-                print(f"\n🔄 Worker {worker_id}: Processing {doc_file.name}")
-
-                # Run full pipeline for this document
+                # Run full pipeline for this document (silently)
                 result = await self._process_document_end_to_end(doc_file)
 
                 worker_results.append(result)
 
+                # Update progress
+                progress.update(overall_task, advance=1)
+
             except Exception as e:
-                print(f"❌ Worker {worker_id}: Failed {doc_file.name}: {e}")
+                console.print(f"[red]❌ Worker {worker_id}: Failed {doc_file.name}: {e}[/red]")
                 import traceback
                 traceback.print_exc()
 
@@ -286,10 +295,12 @@ class DocumentationValidationPipeline:
                     "error": str(e)
                 })
 
+                # Update progress even on failure
+                progress.update(overall_task, advance=1)
+
             finally:
                 document_queue.task_done()
 
-        print(f"🏁 Worker {worker_id}: No more documents, shutting down")
         return worker_results
 
     async def run(self) -> Dict[str, Any]:
@@ -305,6 +316,7 @@ class DocumentationValidationPipeline:
         overall_start = datetime.now()
 
         # 1. Clone repository
+        console.print("\n[cyan]🔄 Cloning repository...[/cyan]")
         await self.clone_repository()
 
         # 2. Find all markdown files
@@ -314,7 +326,7 @@ class DocumentationValidationPipeline:
         )
 
         if not md_files:
-            print("❌ No markdown files found")
+            console.print("[red]❌ No markdown files found[/red]")
             return {
                 "run_id": self.run_id,
                 "status": "failed",
@@ -329,25 +341,41 @@ class DocumentationValidationPipeline:
         for doc in sorted_docs:
             await document_queue.put(doc)
 
-        print(f"\n🚀 Launching {self.num_workers} workers to process {len(sorted_docs)} documents\n")
+        console.print(f"\n[bold cyan]🚀 Launching {self.num_workers} workers to process {len(sorted_docs)} documents[/bold cyan]\n")
 
-        # 5. Launch worker pool
-        workers = [
-            self._worker(worker_id, document_queue)
-            for worker_id in range(self.num_workers)
-        ]
+        # 5. Launch worker pool with progress tracking
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            TimeElapsedColumn(),
+            console=console,
+        ) as progress:
 
-        # 6. Wait for all workers to complete
-        worker_results = await asyncio.gather(*workers)
+            # Overall progress task
+            overall_task = progress.add_task(
+                f"[cyan]Processing {len(sorted_docs)} documents",
+                total=len(sorted_docs)
+            )
+
+            # Create progress-aware workers
+            workers = [
+                self._worker_with_progress(worker_id, document_queue, progress, overall_task)
+                for worker_id in range(self.num_workers)
+            ]
+
+            # Wait for all workers to complete
+            worker_results = await asyncio.gather(*workers)
 
         # 7. Flatten results from all workers
         all_results = [r for worker in worker_results for r in worker]
 
         overall_duration = (datetime.now() - overall_start).total_seconds()
 
-        print(f"\n✨ Pipeline complete in {overall_duration:.1f}s ({overall_duration/60:.1f}m)")
-        print(f"   Documents processed: {len([r for r in all_results if r['status'] == 'success'])}/{len(all_results)}")
-        print(f"   Failed: {len([r for r in all_results if r['status'] == 'failed'])}")
+        console.print(f"\n[bold green]✨ Pipeline complete in {overall_duration:.1f}s ({overall_duration/60:.1f}m)[/bold green]")
+        console.print(f"   Documents processed: [green]{len([r for r in all_results if r['status'] == 'success'])}[/green]/{len(all_results)}")
+        console.print(f"   Failed: [red]{len([r for r in all_results if r['status'] == 'failed'])}[/red]")
 
         # Mark as complete
         if self.run_context:

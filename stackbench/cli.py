@@ -83,8 +83,8 @@ def run(
     if include_folders:
         include_folders_list = [f.strip() for f in include_folders.split(",")]
 
-    # Set output directory
-    output_dir = Path(output) if output else Path("./data")
+    # Set output directory (resolve to absolute path)
+    output_dir = Path(output).resolve() if output else Path("./data").resolve()
 
     # Display header
     console.print(Panel.fit(

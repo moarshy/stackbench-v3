@@ -979,8 +979,24 @@ class DocumentationClarityAgent:
                     warnings=all_warnings
                 )
 
+                # Validate JSON before saving
+                from stackbench.hooks import validate_validation_output_json
+
+                analysis_dict = json.loads(analysis.model_dump_json())
+                filename = f"{extraction_file.stem.replace('_analysis', '')}_clarity.json"
+
+                passed, errors = validate_validation_output_json(
+                    analysis_dict,
+                    filename,
+                    self.validation_log_dir,
+                    validation_type="clarity_validation"
+                )
+
+                if not passed:
+                    console.print(f"⚠️  {extraction_file.stem.replace('_analysis', '')} - Clarity validation failed: {errors[:2]}")
+
                 # Save to file
-                output_file = self.output_folder / f"{extraction_file.stem.replace('_analysis', '')}_clarity.json"
+                output_file = self.output_folder / filename
                 with open(output_file, 'w', encoding='utf-8') as f:
                     f.write(analysis.model_dump_json(indent=2))
 

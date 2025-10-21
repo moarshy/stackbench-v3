@@ -617,10 +617,10 @@ class APISignatureValidationAgent:
                     params=sig.get("params", []),
                     param_types=sig.get("param_types", {}),
                     defaults=sig.get("defaults", {}),
-                    imports=sig.get("imports", ""),
-                    raw_code=sig.get("raw_code", ""),
+                    imports=sig.get("imports") or "",
+                    raw_code=sig.get("raw_code") or "",
                     line=sig.get("line", 0),
-                    context=sig.get("context", "")
+                    context=sig.get("context") or ""
                 )
 
                 # Create ActualSignature if available
