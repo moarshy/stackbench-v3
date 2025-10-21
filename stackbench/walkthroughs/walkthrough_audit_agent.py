@@ -18,9 +18,11 @@ from claude_agent_sdk import (
     ClaudeAgentOptions,
     AssistantMessage,
     TextBlock,
+    HookMatcher,
 )
 
 from .schemas import AuditResult, GapReport
+from stackbench.hooks.logging import create_logging_hooks, AgentLogger
 
 from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv())
@@ -167,12 +169,27 @@ class WalkthroughAuditAgent:
         # Prepare timestamps
         started_at = datetime.now().isoformat()
 
+        # Setup logging hooks
+        log_dir = self.output_folder / "agent_logs"
+        logger = AgentLogger(
+            log_file=log_dir / "audit.log",
+            tools_log_file=log_dir / "audit_tools.jsonl"
+        )
+        logging_hooks = create_logging_hooks(logger)
+
+        # Create hooks dictionary
+        hooks = {
+            'PreToolUse': logging_hooks['PreToolUse'],
+            'PostToolUse': logging_hooks['PostToolUse']
+        }
+
         # Create Claude SDK client with MCP server
         options = ClaudeAgentOptions(
             system_prompt=AUDIT_SYSTEM_PROMPT,
             allowed_tools=["Bash", "Read", "Write", "Glob"],  # Allow execution tools
             permission_mode="acceptEdits",
             cwd=str(working_directory),
+            hooks=hooks,
             mcp_servers={
                 "walkthrough": {
                     "command": "uv",
@@ -262,6 +279,14 @@ class WalkthroughAuditAgent:
         # For now, we'll use placeholder values
         # In production, we'd read from MCP server state or logs
 
+        # Log final statistics
+        logger.log_message("=== Audit Completed ===", level="INFO")
+        logger.log_message(f"Duration: {duration_seconds:.1f}s", level="INFO")
+        logger.log_message(f"Total steps: {total_steps}", level="INFO")
+        logger.log_message(f"Success: {success}", level="INFO")
+        stats = logger.get_stats()
+        logger.log_message(f"Tool calls: {stats['tool_calls']}, Messages: {stats['messages_logged']}, Errors: {stats['errors']}", level="INFO")
+
         # Create audit result
         result = AuditResult(
             walkthrough_id=walkthrough_path.stem,
@@ -276,7 +301,8 @@ class WalkthroughAuditAgent:
             failed_steps=failed_steps,
             success=success,
             gaps=gaps,
-            execution_log=json.dumps(execution_log, indent=2)
+            execution_log=json.dumps(execution_log, indent=2),
+            agent_log_path=str(log_dir / "audit.log")
         )
 
         # Save result
