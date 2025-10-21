@@ -23,7 +23,11 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 
-from .schemas import Walkthrough, WalkthroughExport, WalkthroughSession, GapReport
+# Handle both relative imports (when used as module) and absolute imports (when run as script)
+try:
+    from .schemas import Walkthrough, WalkthroughExport, WalkthroughSession, GapReport
+except ImportError:
+    from schemas import Walkthrough, WalkthroughExport, WalkthroughSession, GapReport
 
 
 # Configure logging
@@ -43,10 +47,46 @@ class WalkthroughMCPServer:
         self.server = Server("walkthrough-server")
         self.session: Optional[WalkthroughSession] = None
         self.walkthrough_data: Optional[Walkthrough] = None
+        self.session_file: Optional[Path] = None  # File to save session state
 
         # Register tools
         self._register_tools()
         logger.info("WalkthroughMCPServer initialized")
+
+    def _save_session_state(self):
+        """Save current session state to JSON file for the audit agent to read."""
+        if not self.session or not self.session_file:
+            return
+
+        try:
+            session_data = {
+                "walkthrough_id": self.session.walkthrough_id,
+                "current_step": self.session.current_step_number,
+                "total_steps": self.session.total_steps,
+                "completed_steps": self.session.current_step_index,
+                "is_complete": self.session.is_complete,
+                "gaps": [
+                    {
+                        "step_number": gap.step_number,
+                        "step_title": gap.step_title,
+                        "gap_type": gap.gap_type,
+                        "severity": gap.severity,
+                        "description": gap.description,
+                        "suggested_fix": gap.suggested_fix,
+                        "context": gap.context,
+                        "timestamp": gap.timestamp
+                    }
+                    for gap in self.session.gaps_reported
+                ],
+                "last_updated": datetime.now().isoformat()
+            }
+
+            with open(self.session_file, 'w') as f:
+                json.dump(session_data, f, indent=2)
+
+            logger.debug(f"Session state saved to {self.session_file}")
+        except Exception as e:
+            logger.error(f"Failed to save session state: {e}")
 
     def _register_tools(self):
         """Register all MCP tools."""
@@ -203,8 +243,15 @@ class WalkthroughMCPServer:
                 walkthrough=self.walkthrough_data
             )
 
+            # Set session file path (save in same directory as walkthrough)
+            self.session_file = path.parent / f"{walkthrough_id}_session.json"
+
             logger.info(f"Walkthrough session started: {walkthrough_id}")
             logger.info(f"Total steps: {self.session.total_steps}")
+            logger.info(f"Session file: {self.session_file}")
+
+            # Save initial session state
+            self._save_session_state()
 
             result = {
                 "status": "started",
@@ -256,6 +303,9 @@ class WalkthroughMCPServer:
 
         # Advance to next step
         self.session.current_step_index += 1
+
+        # Save session state after advancing
+        self._save_session_state()
 
         logger.info(f"Returned step {result['step_number']}/{result['total_steps']}: {step.title}")
 
@@ -320,6 +370,9 @@ class WalkthroughMCPServer:
         )
 
         self.session.gaps_reported.append(gap)
+
+        # Save session state after reporting gap
+        self._save_session_state()
 
         logger.info(f"Gap reported for step {step_number}: {gap_type} ({severity})")
 

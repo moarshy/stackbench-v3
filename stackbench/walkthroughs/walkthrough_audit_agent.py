@@ -34,18 +34,20 @@ load_dotenv(find_dotenv())
 
 AUDIT_SYSTEM_PROMPT = """You are an expert software developer tasked with following a tutorial walkthrough to validate its quality.
 
-You have access to an MCP server that provides walkthrough steps one at a time. Your job is to:
+You have access to an MCP server (namespace: "walkthrough") that provides walkthrough steps one at a time. Your job is to:
 
 1. **Execute each step** exactly as a real developer would
 2. **Identify gaps** in documentation (unclear instructions, missing prerequisites, broken commands, etc.)
 3. **Report issues** using the report_gap MCP tool
 4. **Continue through the walkthrough** even if you encounter issues
 
-AVAILABLE MCP TOOLS:
-- `start_walkthrough(walkthrough_path)`: Initialize the walkthrough
-- `next_step()`: Get the next step to execute
-- `walkthrough_status()`: Check your progress
-- `report_gap(gap_type, severity, description, ...)`: Report an issue
+IMPORTANT: You MUST use the MCP tools to access the walkthrough. Do NOT manually read the walkthrough JSON file.
+
+AVAILABLE MCP TOOLS (prefix with "mcp__walkthrough__"):
+- `mcp__walkthrough__start_walkthrough(walkthrough_path)`: Initialize the walkthrough
+- `mcp__walkthrough__next_step()`: Get the next step to execute
+- `mcp__walkthrough__walkthrough_status()`: Check your progress
+- `mcp__walkthrough__report_gap(gap_type, severity, description, ...)`: Report an issue
 
 GAP TYPES:
 - **clarity**: Instructions are vague, ambiguous, or confusing
@@ -89,14 +91,14 @@ Walkthrough file: {walkthrough_path}
 Please start the walkthrough and execute each step, reporting any gaps or issues you find.
 
 Follow this process:
-1. Call `start_walkthrough` with the walkthrough path
+1. Call `mcp__walkthrough__start_walkthrough` with the walkthrough path
 2. For each step:
-   - Call `next_step` to get step details
+   - Call `mcp__walkthrough__next_step` to get step details
    - Execute the operations
-   - Report any gaps using `report_gap`
+   - Report any gaps using `mcp__walkthrough__report_gap`
 3. Continue until complete
 
-Begin now by calling `start_walkthrough("{walkthrough_path}")`.
+Begin now by calling the mcp__walkthrough__start_walkthrough tool with walkthrough_path="{walkthrough_path}".
 """
 
 
@@ -187,13 +189,13 @@ class WalkthroughAuditAgent:
         options = ClaudeAgentOptions(
             system_prompt=AUDIT_SYSTEM_PROMPT,
             allowed_tools=["Bash", "Read", "Write", "Glob"],  # Allow execution tools
-            permission_mode="acceptEdits",
+            permission_mode="bypassPermissions",  # Bypass permissions for MCP tool calls
             cwd=str(working_directory),
             hooks=hooks,
             mcp_servers={
                 "walkthrough": {
                     "command": "uv",
-                    "args": ["run", "python", str(self.mcp_server_path.absolute())],
+                    "args": ["run", "python", "-m", "stackbench.walkthroughs.mcp_server"],
                 }
             }
         )
@@ -275,9 +277,37 @@ class WalkthroughAuditAgent:
         walkthrough_title = walkthrough_data.get("walkthrough", {}).get("title", "Unknown")
         total_steps = len(walkthrough_data.get("steps", []))
 
-        # TODO: Parse MCP server logs to extract actual gaps reported
-        # For now, we'll use placeholder values
-        # In production, we'd read from MCP server state or logs
+        # Load gaps from MCP server session file
+        session_file = walkthrough_path.parent / f"{walkthrough_path.stem}_session.json"
+        if session_file.exists():
+            try:
+                with open(session_file, 'r') as f:
+                    session_data = json.load(f)
+
+                # Extract gaps from session
+                for gap_data in session_data.get("gaps", []):
+                    gap = GapReport(
+                        step_number=gap_data["step_number"],
+                        step_title=gap_data["step_title"],
+                        gap_type=gap_data["gap_type"],
+                        severity=gap_data["severity"],
+                        description=gap_data["description"],
+                        suggested_fix=gap_data.get("suggested_fix"),
+                        context=gap_data.get("context"),
+                        timestamp=gap_data.get("timestamp")
+                    )
+                    gaps.append(gap)
+
+                # Update completion stats from session
+                completed_steps = session_data.get("completed_steps", 0)
+                failed_steps = total_steps - completed_steps if not session_data.get("is_complete", False) else 0
+
+                logger.log_message(f"Loaded {len(gaps)} gaps from MCP session file", level="INFO")
+                logger.log_message(f"Completed steps: {completed_steps}/{total_steps}", level="INFO")
+            except Exception as e:
+                logger.log_message(f"Warning: Failed to load MCP session file: {e}", level="WARNING")
+        else:
+            logger.log_message(f"Warning: MCP session file not found at {session_file}", level="WARNING")
 
         # Log final statistics
         logger.log_message("=== Audit Completed ===", level="INFO")
