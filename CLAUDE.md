@@ -25,18 +25,26 @@ Traditional documentation tools focus on *generating* documentation from code (J
 
 ### The AI Solution
 
-Stackbench uses Claude Code agents to systematically validate documentation quality at scale. By treating documentation validation as an agentic task, we can:
+Stackbench uses Claude Code agents to systematically validate documentation quality at scale through two complementary systems:
 
+**Core Validation Pipeline:**
 1. **Extract structured data** from unstructured markdown
 2. **Validate API signatures** through dynamic code introspection
 3. **Execute code examples** in isolated environments
-4. **Provide actionable feedback** on what's broken and why
+4. **Assess clarity** using LLM-as-judge scoring
+5. **Provide actionable feedback** on what's broken and why
 
-This approach combines the best of static analysis (fast, deterministic) with dynamic testing (catches runtime issues) and AI reasoning (handles ambiguity).
+**Walkthrough Validation System:**
+1. **Generate step-by-step tutorials** from documentation
+2. **Execute tutorials dynamically** like a real developer following them
+3. **Identify gaps through actual execution** (missing prerequisites, logical flow issues, broken commands)
+4. **Report contextual issues** ("At step 3, couldn't complete because X was missing")
+
+This approach combines static analysis (fast, deterministic), dynamic testing (catches runtime issues), AI reasoning (handles ambiguity), and experiential validation (simulates real user experience).
 
 ## Architecture
 
-### Three-Agent Pipeline
+### Four-Agent Pipeline
 
 Stackbench uses a pipeline of specialized Claude Code agents:
 
@@ -64,16 +72,27 @@ Stackbench uses a pipeline of specialized Claude Code agents:
 │  • Catches: syntax errors, runtime errors, import issues    │
 │  • Reports: success/failure with detailed error messages    │
 └─────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────┐
+│           DOCUMENTATION CLARITY VALIDATION AGENT            │
+│  • LLM-as-judge system for user experience quality          │
+│  • Pre-processes MkDocs Material snippet includes           │
+│  • Evaluates: instruction clarity, logical flow, prereqs    │
+│  • Scores 5 dimensions on 0-10 scale with rubric            │
+│  • Flags: unclear steps, missing prereqs, logical gaps      │
+│  • Provides: actionable suggestions with line numbers       │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ### Parallel Processing
 
-The extraction phase processes multiple documents concurrently using worker pools:
+Both the extraction and clarity validation phases process multiple documents concurrently using worker pools:
 
 - **Default: 5 workers** - Configurable via `--num-workers`
 - Each worker runs an independent Claude Code agent
 - Results are validated and aggregated
 - Enables processing large documentation sets efficiently
+- Clarity validation processed 7 LanceDB docs in ~3 minutes with 5 workers
 
 ### Hook System
 
@@ -163,7 +182,113 @@ Agent Response:
 
 The agent learns from validation errors and fixes them in the next iteration.
 
-### 4. Audit Trail
+### 4. LLM-as-Judge for Clarity
+
+The clarity validation agent uses Claude itself to evaluate documentation from a user experience perspective:
+
+**What it catches that static analysis misses:**
+```markdown
+## Configuration
+
+To configure the database, create a config file:
+
+\`\`\`python
+config = lancedb.Config.from_file('config.yaml')
+db = lancedb.connect(config=config)
+\`\`\`
+```
+
+**Clarity Agent identifies:**
+- ❌ **Logical gap** - "Step references config.yaml but file was never created"
+- ❌ **Missing prerequisite** - "No explanation of config.yaml format or required fields"
+- **Suggestion:** "Add Step 1b: Create config.yaml with fields: host, port, database_name"
+
+**Multi-dimensional scoring (0-10 scale):**
+```json
+{
+  "instruction_clarity": 6.0,      // Are steps clear and actionable?
+  "logical_flow": 5.0,             // Do steps build on each other?
+  "completeness": 6.5,             // All prerequisites mentioned?
+  "consistency": 8.0,              // Terminology consistent?
+  "prerequisite_coverage": 5.0,    // Prerequisites upfront?
+  "overall_score": 6.1
+}
+```
+
+**Granular location reporting:**
+Every issue includes section name, line number, and step number:
+> "Step 3 at line 45 in 'Configuration' section references config.yaml not created in Step 1"
+
+**Smart optimizations:**
+- Pre-processes MkDocs Material `--8<--` snippet includes before sending to Claude
+- Reduces API calls by resolving deterministic patterns programmatically
+- Falls back to agent tool use for complex cases
+
+**Context integration:**
+Reads results from API signature and code validation agents to correlate issues:
+> "This code example failed API validation AND has unclear instructions (double problem)"
+
+### 5. Dynamic Tutorial Execution via Walkthroughs
+
+The walkthrough system takes validation beyond static analysis by **actually following tutorials step-by-step**:
+
+**How it works:**
+```
+1. Generate Agent reads tutorial docs
+   ↓ Extracts 10 logical steps
+2. MCP Server loads walkthrough JSON
+   ↓ Delivers steps one-by-one
+3. Audit Agent executes each step
+   ↓ Reports gaps as they occur
+4. Gap report generated
+```
+
+**What it catches that other systems miss:**
+
+Example tutorial:
+```markdown
+## Quick Start
+
+1. Install the library: `pip install lancedb`
+2. Import and connect:
+   ```python
+   import lancedb
+   db = lancedb.connect("./my_database")
+   ```
+3. Query your data:
+   ```python
+   results = db.open_table("my_table").search([1.0, 2.0]).limit(5)
+   ```
+```
+
+**Walkthrough Audit Agent identifies:**
+- ❌ **Logical flow gap (critical)** - "Step 3 references table 'my_table' but no step shows creating it"
+- ❌ **Completeness gap (warning)** - "No verification step to confirm database created successfully"
+- ❌ **Execution gap (critical)** - "Step 3 fails with 'table not found' error"
+- **Suggestion:** "Add Step 2b: Create table with schema before querying"
+
+**Why MCP Server is key:**
+- **Enforces sequential execution** - Agent can't skip ahead or see all steps
+- **Simulates real user experience** - Discovers gaps through actual execution
+- **State tracking** - Server knows exactly which steps completed
+- **Structured gap reporting** - 6 categories (clarity, prerequisite, logical_flow, execution, completeness, cross_reference)
+
+**Real example:**
+The `demo-nextjs-walkthrough.json` contains 10 steps covering Next.js setup. When audited, the agent:
+1. Verifies Node.js 18.18+ installed
+2. Runs `npx create-next-app@latest`
+3. Explores project structure
+4. Starts dev server on localhost:3000
+5. Makes first code edit and sees hot reload
+6. Tests all npm scripts (dev, build, start, lint)
+
+Each step provides:
+- `contentForUser`: What the user reads
+- `contextForAgent`: Background knowledge
+- `operationsForAgent`: Exact commands to run
+- `introductionForAgent`: Purpose and goals
+
+### 6. Audit Trail
 
 Every agent run produces:
 - **Extraction outputs** - Structured JSON of what was found
@@ -220,14 +345,15 @@ Hooks approach:
 - ✅ Fast - Runs in-line
 - ✅ Clean - Separation of concerns
 
-#### Why Three Agents?
+#### Why Four Agents?
 
 Why not one agent that does everything?
 
 1. **Specialization** - Each agent has a focused prompt and tool set
 2. **Resumability** - Can re-run validation without re-extracting
-3. **Parallelism** - Extraction can process multiple docs concurrently
+3. **Parallelism** - Extraction and clarity validation process multiple docs concurrently
 4. **Debugging** - Easier to trace issues to a specific stage
+5. **Context integration** - Clarity agent can read results from API/code validation to correlate issues
 
 ### Data Flow
 
@@ -247,7 +373,11 @@ INPUT: GitHub Repository
 5. For each extraction file (sequential):
    Code Validation Agent → data/<run_id>/results/code_validation/<doc>_validation.json
     ↓
-OUTPUT: Summary statistics + detailed JSON reports
+6. For each document (parallel):
+   Clarity Validation Agent → data/<run_id>/results/clarity_validation/<doc>_clarity.json
+   (Reads extraction metadata, original markdown, and optionally API/code validation results)
+    ↓
+OUTPUT: Summary statistics + detailed JSON reports + clarity scores
 ```
 
 ## Use Cases
@@ -288,21 +418,39 @@ OUTPUT: Summary statistics + detailed JSON reports
 
 ### Currently Implemented (v0.1)
 
-**3 Agents:**
+**Core Pipeline - 4 Agents:**
 1. ✅ Extraction Agent
 2. ✅ API Signature Validation Agent
 3. ✅ Code Example Validation Agent
+4. ✅ Documentation Clarity Validation Agent (LLM-as-judge)
+
+**Walkthrough System - 2 Agents + MCP Server:**
+5. ✅ Walkthrough Generate Agent
+6. ✅ Walkthrough Audit Agent
+7. ✅ MCP Server (stdio-based, step delivery)
 
 **Infrastructure:**
 - ✅ Parallel extraction with workers (configurable, default 5)
+- ✅ Parallel clarity validation with workers (configurable, default 5)
 - ✅ Programmatic validation hooks (PreToolUse)
 - ✅ Logging hooks (PreToolUse + PostToolUse)
-- ✅ CLI with rich output
+- ✅ CLI with rich output (includes clarity scores and issue counts)
 - ✅ Web interface (basic)
+- ✅ MkDocs Material snippet preprocessing (optimization for clarity agent)
+- ✅ MCP server for controlled walkthrough execution
+- ✅ Gap detection across 6 categories
 
 **Features from [7-feature plan](docs/0-plan.md):**
 - ✅ API Signature Accuracy (Tier 1)
 - ✅ Code Example Validation (Tier 1)
+- ✅ Accessibility & Clarity (Tier 3) - **Fully implemented!**
+  - Instruction clarity scoring (0-10 rubric)
+  - Logical flow analysis (step dependencies)
+  - Prerequisite coverage validation
+  - Consistency checking (terminology, code style)
+  - Technical accessibility (broken links, alt text, code block languages)
+  - Granular location reporting (section, line, step number)
+  - Actionable suggestions for improvement
 - 🚧 Non-Existent APIs (Tier 1) - Partially implemented (detects documented APIs that don't exist, but not missing docs for existing APIs)
 
 ### Planned Agents & Features
@@ -310,42 +458,50 @@ OUTPUT: Summary statistics + detailed JSON reports
 **Additional Agents** (Not yet implemented):
 - Deprecated API Detection Agent
 - Missing Coverage Agent
-- Consistency Checker Agent
-- Accessibility Validator Agent
 - Real-World Patterns Agent
 
 **Tier 2: High Value**
 4. **Deprecated API Usage** - Detect `@deprecated` in code, flag docs that still use old APIs
 5. **Missing API Coverage** - Find APIs in codebase without documentation
 
-**Tier 3: Quality Improvements**
-6. **Accessibility & Clarity** - Broken links, missing alt text, ambiguous references
-7. **Consistency Issues** - Mixed naming conventions, inconsistent terminology
-
 **Tier 4: Advanced**
-8. **Real-World Integration Gaps** - Missing error handling, security patterns, production considerations
+6. **Real-World Integration Gaps** - Missing error handling, security patterns, production considerations
 
-### Walkthrough-Based Validation System (Planned)
+### Walkthrough-Based Validation System ✅ Implemented
 
-A new **standalone system** for validating documentation through interactive, step-by-step execution:
+A **standalone system** that validates documentation through interactive, step-by-step execution - now fully operational!
 
 **Architecture:**
-- **Generate Agent**: Converts tutorial docs into structured walkthrough JSON with step-by-step instructions
-- **Audit Agent**: Actually follows the walkthrough like a real developer, executing each step
-- **MCP Server**: Supplies steps one-by-one via stdio, preventing the agent from skipping ahead
+- **Generate Agent** (`walkthrough_generate_agent.py`): Converts tutorial docs into structured walkthrough JSON with step-by-step instructions
+  - Extracts 4 content fields per step: contentForUser, contextForAgent, operationsForAgent, introductionForAgent
+  - Validates output against WalkthroughExport schema via hooks
+  - Logs all operations for debugging
+
+- **Audit Agent** (`walkthrough_audit_agent.py`): Actually follows the walkthrough like a real developer, executing each step
+  - Connects to MCP server for step delivery
+  - Executes operations (bash commands, file operations)
+  - Reports gaps through MCP tools
+  - Generates comprehensive AuditResult JSON
+
+- **MCP Server** (`mcp_server.py`): Supplies steps one-by-one via stdio, preventing the agent from skipping ahead
+  - Tools: `start_walkthrough()`, `next_step()`, `walkthrough_status()`, `report_gap()`
+  - Maintains WalkthroughSession state
+  - Enforces sequential execution (can't skip steps)
+
 - **Gap Detection**: Identifies 6 categories of issues:
-  - Clarity gaps (vague instructions, missing context)
-  - Prerequisite gaps (missing dependencies, undeclared requirements)
-  - Logical flow gaps (steps reference undefined resources)
-  - Execution gaps (commands fail, syntax errors)
-  - Completeness gaps (missing verification steps)
-  - Cross-reference gaps (should link to other docs)
+  - **Clarity gaps**: Vague instructions, missing context
+  - **Prerequisite gaps**: Missing dependencies, undeclared requirements
+  - **Logical flow gaps**: Steps reference undefined resources
+  - **Execution gaps**: Commands fail, syntax errors
+  - **Completeness gaps**: Missing verification steps
+  - **Cross-reference gaps**: Should link to other docs
 
 **Why It's Powerful:**
 - **Dynamic execution**: Agent experiences documentation like a real user would
-- **Controlled testing**: MCP server enforces sequential step execution
+- **Controlled testing**: MCP server enforces sequential step execution (can't skip ahead)
 - **Actionable feedback**: "At step 3, command failed because X was missing"
-- **Complements current system**: Static analysis catches API errors, walkthroughs catch tutorial issues
+- **Complements core pipeline**: Static analysis catches API errors, walkthroughs catch tutorial issues
+- **Granular reporting**: Each gap includes step number, severity, description, and suggested fix
 
 **CLI Commands:**
 ```bash
@@ -380,9 +536,24 @@ stackbench walkthrough run \
 ```
 
 **Directory Structure:**
-All walkthroughs live under `data/<uuid>/walkthroughs/wt_*/` where `<uuid>` is either from an existing core pipeline run or a new walkthrough-only run. This ensures the audit agent has access to the full repository context.
+```
+data/<uuid>/walkthroughs/wt_<walkthrough-uuid>/
+├── wt_<uuid>.json                      # Generated walkthrough
+├── wt_<uuid>_audit.json               # Audit results (gaps found)
+├── agent_logs/
+│   ├── generate.log                    # Human-readable generation logs
+│   ├── generate_tools.jsonl            # Tool call trace (generation)
+│   ├── audit.log                       # Human-readable audit logs
+│   └── audit_tools.jsonl               # Tool call trace (audit)
+└── validation_logs/
+    └── walkthrough_generation_validation_calls.txt
+```
 
-See [local-docs/walkthrough-validation-plan.md](local-docs/walkthrough-validation-plan.md) for full design details.
+**Real Example:**
+See `local-docs/demo-nextjs-walkthrough.json` for a production walkthrough with 10 steps covering Next.js setup, development server, first edits, and configuration.
+
+**Implementation Details:**
+See [local-docs/walkthrough-validation-plan.md](local-docs/walkthrough-validation-plan.md) for architecture design and [stackbench/walkthroughs/README.md](stackbench/walkthroughs/README.md) for module documentation.
 
 ### Technical Improvements
 
@@ -400,16 +571,48 @@ See [local-docs/walkthrough-validation-plan.md](local-docs/walkthrough-validatio
 ```
 stackbench-v3/
 ├── stackbench/           # Python package
-│   ├── agents/          # Extraction, API validation, Code validation
+│   ├── agents/          # Core validation agents
+│   │   ├── extraction_agent.py
+│   │   ├── api_validation_agent.py
+│   │   ├── code_validation_agent.py
+│   │   └── clarity_agent.py
+│   ├── walkthroughs/    # Walkthrough validation system ✨ NEW
+│   │   ├── __init__.py
+│   │   ├── schemas.py                      # Walkthrough data models
+│   │   ├── walkthrough_generate_agent.py   # Generate walkthroughs from docs
+│   │   ├── walkthrough_audit_agent.py      # Execute walkthroughs
+│   │   ├── mcp_server.py                   # MCP server for step delivery
+│   │   └── README.md                       # Module documentation
 │   ├── hooks/           # Validation hooks, Logging hooks, Hook manager
+│   │   ├── validation.py            # All validation schemas (core + walkthrough)
+│   │   └── manager.py               # Routes all agents to hooks
 │   ├── pipeline/        # Pipeline orchestration
+│   │   └── runner.py                # Core pipeline (extraction → validation)
 │   ├── repository/      # Git repository management
-│   ├── schemas/         # Pydantic models
-│   └── cli.py           # CLI entry point
+│   ├── schemas/         # Pydantic models (core pipeline)
+│   └── cli.py           # CLI entry point (core + walkthrough commands)
 ├── frontend/            # React web interface
 ├── docs/                # Project documentation
+├── local-docs/          # Design documents and examples
+│   ├── walkthrough-validation-plan.md      # Walkthrough architecture
+│   └── demo-nextjs-walkthrough.json        # Real example (10 steps)
 ├── tests/               # Test suite
 └── data/                # Output directory (gitignored)
+    └── <run_id>/
+        ├── repository/                      # Cloned git repo
+        ├── results/                         # Core pipeline results
+        │   ├── extraction/
+        │   ├── api_validation/
+        │   ├── code_validation/
+        │   └── clarity_validation/
+        ├── validation_logs/                 # Core pipeline logs
+        │   └── clarity_logs/
+        └── walkthroughs/                    # Walkthrough outputs ✨ NEW
+            └── wt_<uuid>/
+                ├── wt_<uuid>.json           # Generated walkthrough
+                ├── wt_<uuid>_audit.json     # Audit results
+                ├── agent_logs/              # Generation + audit logs
+                └── validation_logs/         # Walkthrough validation
 ```
 
 ### Development Setup

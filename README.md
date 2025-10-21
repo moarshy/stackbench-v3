@@ -11,15 +11,26 @@ Stackbench uses Claude Code agents to automatically validate documentation throu
 1. **Extraction** - Analyzes markdown documentation to extract API signatures and code examples
 2. **API Signature Validation** - Validates that documented function signatures match actual library implementations
 3. **Code Example Validation** - Tests that code examples actually run without errors
-4. **Clarity Validation** - Assesses documentation clarity and structure
+4. **Clarity Validation** - LLM-as-judge system that evaluates documentation from a user experience perspective:
+   - Scores 5 dimensions on 0-10 scale (instruction clarity, logical flow, completeness, consistency, prerequisites)
+   - Identifies unclear instructions, missing prerequisites, logical gaps, and broken links
+   - Provides actionable suggestions with precise line numbers
+   - Pre-processes MkDocs Material snippet includes for efficiency
 
-### Walkthrough Validation System (New!)
+### Walkthrough Validation System (Fully Implemented!)
 
 A standalone system that validates tutorial quality through step-by-step execution:
 
-1. **Generate Walkthroughs** - Converts tutorial documentation into structured step-by-step walkthroughs
-2. **Audit Walkthroughs** - Claude Code agent actually follows the tutorial like a real developer
-3. **Gap Detection** - Identifies missing prerequisites, unclear instructions, broken commands, and logical flow issues
+1. **Generate Walkthroughs** - Converts tutorial documentation into structured step-by-step walkthroughs with 4 content fields per step (contentForUser, contextForAgent, operationsForAgent, introductionForAgent)
+2. **MCP Server** - Supplies steps one-by-one via stdio protocol, preventing the agent from skipping ahead and simulating real user experience
+3. **Audit Walkthroughs** - Claude Code agent actually follows the tutorial like a real developer, executing each step sequentially
+4. **Gap Detection** - Identifies 6 categories of issues:
+   - **Clarity gaps**: Vague instructions, missing context
+   - **Prerequisite gaps**: Missing dependencies, undeclared requirements
+   - **Logical flow gaps**: Steps reference undefined resources
+   - **Execution gaps**: Commands fail, syntax errors
+   - **Completeness gaps**: Missing verification steps
+   - **Cross-reference gaps**: Should link to other docs
 
 Each process uses Claude Code with intelligent hooks that validate outputs and log execution details.
 
@@ -83,11 +94,15 @@ uv run stackbench walkthrough run \
 - Walkthrough-only run: `data/<new-uuid>/repository/` and `data/<new-uuid>/walkthroughs/wt_*/`
 
 **What makes walkthroughs powerful:**
-- Agent actually executes each step (doesn't just read)
-- Identifies gaps through real experience ("Step 3 failed because X was missing")
-- 6 gap categories: clarity, prerequisites, logical flow, execution errors, completeness, cross-references
-- Complements core validation (static analysis vs dynamic execution)
-- Repository context: Audit agent can install library, run commands, access example files
+- **Dynamic execution**: Agent actually executes each step (doesn't just read)
+- **MCP-controlled pacing**: Server delivers one step at a time, can't skip ahead
+- **Real experience**: Identifies gaps through actual execution ("At step 3, command failed because X was missing")
+- **6 gap categories**: clarity, prerequisites, logical flow, execution errors, completeness, cross-references
+- **Complements core pipeline**: Static analysis catches API errors, walkthroughs catch tutorial issues
+- **Full repository context**: Audit agent can install library, run commands, access example files
+- **Structured reporting**: Each gap includes step number, severity (critical/warning/info), description, and suggested fix
+
+**Real example**: See `local-docs/demo-nextjs-walkthrough.json` for a production walkthrough with 10 steps covering Next.js setup, development server, hot reload, and configuration.
 
 ### Web Interface
 
@@ -137,6 +152,10 @@ For details, see `stackbench/walkthroughs/README.md`
 
 - **Main Documentation**: `CLAUDE.md` - Comprehensive overview of architecture and design
 - **Feature Plan**: `docs/0-plan.md` - Detailed feature roadmap
-- **Walkthrough System**: `local-docs/walkthrough-validation-plan.md` - Walkthrough validation design
 - **Hooks Deep Dive**: `stackbench/hooks/README.md` - Hook system details
-- **Walkthroughs Guide**: `stackbench/walkthroughs/README.md` - Walkthrough module documentation
+
+**Walkthrough System:**
+- **Architecture Design**: `local-docs/walkthrough-validation-plan.md` - Original design document
+- **Module Documentation**: `stackbench/walkthroughs/README.md` - Implementation guide
+- **Real Example**: `local-docs/demo-nextjs-walkthrough.json` - Production walkthrough with 10 steps
+- **MCP Server Guide**: `stackbench/walkthroughs/mcp_server.py` - Step delivery protocol
