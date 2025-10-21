@@ -686,7 +686,7 @@ class APISignatureValidationAgent:
 
             processing_time = int((datetime.now() - start_time).total_seconds() * 1000)
 
-            return ValidationOutput(
+            validation_output = ValidationOutput(
                 validation_id=str(uuid.uuid4()),
                 validated_at=datetime.now().isoformat(),
                 source_file=extraction_file.name,
@@ -700,6 +700,29 @@ class APISignatureValidationAgent:
                 processing_time_ms=processing_time,
                 warnings=warnings
             )
+
+            # Validate JSON before saving
+            from stackbench.hooks import validate_validation_output_json
+
+            validation_dict = json.loads(validation_output.model_dump_json())
+            filename = f"{extraction_file.stem}_validation.json"
+
+            passed, errors = validate_validation_output_json(
+                validation_dict,
+                filename,
+                self.validation_log_dir,
+                validation_type="api_signature_validation"
+            )
+
+            if not passed:
+                print(f"⚠️  {extraction_file.stem.replace('_analysis', '')} - API validation failed: {errors[:2] if errors else 'Unknown error'}")
+
+            # Save validation output
+            output_file = self.output_folder / filename
+            with open(output_file, 'w', encoding='utf-8') as f:
+                f.write(validation_output.model_dump_json(indent=2))
+
+            return validation_output
 
     async def _validate_document_with_save(
         self,
