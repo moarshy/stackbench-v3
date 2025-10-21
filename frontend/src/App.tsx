@@ -28,6 +28,7 @@ function App() {
   const [ccCodeExValidation, setCCCodeExValidation] = useState<CCCodeExampleValidationOutput | null>(null);
   const [ccClarityValidation, setCCClarityValidation] = useState<CCClarityValidationOutput | null>(null);
   const [walkthroughs, setWalkthroughs] = useState<string[]>([]);
+  const [walkthroughTitles, setWalkthroughTitles] = useState<Map<string, string>>(new Map());
   const [selectedWalkthrough, setSelectedWalkthrough] = useState<string | null>(null);
   const [walkthroughData, setWalkthroughData] = useState<WalkthroughData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -110,6 +111,22 @@ function App() {
     try {
       const wtIds = await apiService.getWalkthroughs();
       setWalkthroughs(wtIds);
+
+      // Fetch titles for all walkthroughs
+      const titles = new Map<string, string>();
+      for (const wtId of wtIds) {
+        try {
+          const data = await apiService.getWalkthroughData(wtId);
+          if (data) {
+            titles.set(wtId, data.walkthrough.walkthrough.title);
+          }
+        } catch (err) {
+          console.error(`Failed to fetch title for ${wtId}:`, err);
+          titles.set(wtId, wtId); // Fallback to ID
+        }
+      }
+      setWalkthroughTitles(titles);
+
       // Auto-select first walkthrough if available
       if (wtIds.length > 0 && !selectedWalkthrough) {
         setSelectedWalkthrough(wtIds[0]);
@@ -348,13 +365,17 @@ function App() {
               </div>
             ) : (
               <div className="flex flex-col h-full">
-                {/* Walkthrough selector if multiple walkthroughs */}
-                {walkthroughs.length > 1 && (
-                  <div className="p-4 border-b border-border bg-card">
-                    <label className="block text-sm font-medium mb-2 flex items-center gap-2">
-                      <Route className="h-4 w-4" />
-                      Select Walkthrough ({walkthroughs.length} available)
-                    </label>
+                {/* Walkthrough selector - always visible */}
+                <div className="p-4 border-b border-border bg-card">
+                  <label className="block text-sm font-medium mb-2 flex items-center gap-2">
+                    <Route className="h-4 w-4" />
+                    {walkthroughs.length > 1 ? (
+                      <span>Select Walkthrough ({walkthroughs.length} available)</span>
+                    ) : (
+                      <span>Walkthrough</span>
+                    )}
+                  </label>
+                  {walkthroughs.length > 1 ? (
                     <select
                       value={selectedWalkthrough || ''}
                       onChange={(e) => setSelectedWalkthrough(e.target.value)}
@@ -362,12 +383,16 @@ function App() {
                     >
                       {walkthroughs.map((wtId) => (
                         <option key={wtId} value={wtId}>
-                          {walkthroughData?.walkthrough.walkthrough.title || wtId}
+                          {walkthroughTitles.get(wtId) || wtId}
                         </option>
                       ))}
                     </select>
-                  </div>
-                )}
+                  ) : (
+                    <div className="px-3 py-2 rounded-md border border-input bg-muted text-sm">
+                      {walkthroughTitles.get(selectedWalkthrough || '') || selectedWalkthrough || 'Loading...'}
+                    </div>
+                  )}
+                </div>
 
                 {/* Walkthrough viewer */}
                 <div className="flex-1 overflow-hidden">
