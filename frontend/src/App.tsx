@@ -467,12 +467,57 @@ function App() {
                     <ChevronLeft className="h-4 w-4" />
                   </button>
                 </div>
+
+                {/* Validation Summary Badge */}
+                {ccCodeExValidation && (
+                  <div className="mb-4 p-3 bg-muted rounded-lg flex items-center gap-3 text-sm">
+                    <div className="flex items-center gap-3 flex-wrap">
+                      {ccCodeExValidation.successful > 0 && (
+                        <span className="text-green-600 dark:text-green-400 font-semibold flex items-center gap-1">
+                          ✅ {ccCodeExValidation.successful} passed
+                        </span>
+                      )}
+                      {ccCodeExValidation.failed > 0 && (
+                        <span className="text-red-600 dark:text-red-400 font-semibold flex items-center gap-1">
+                          ❌ {ccCodeExValidation.failed} failed
+                        </span>
+                      )}
+                      {ccCodeExValidation.skipped > 0 && (
+                        <span className="text-gray-600 dark:text-gray-400 flex items-center gap-1">
+                          ⏭️ {ccCodeExValidation.skipped} skipped
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-muted-foreground ml-auto">
+                      {ccCodeExValidation.total_examples} total examples
+                    </div>
+                  </div>
+                )}
+
                 {loading ? (
                   <div className="text-sm text-muted-foreground">Loading...</div>
                 ) : (
                   <MarkdownViewer
                     content={docContent}
                     baseImagePath={selectedRun ? `${apiService.getBaseDataDir()}/${selectedRun.run_id}/repository` : ''}
+                    codeValidation={ccCodeExValidation}
+                    onExampleClick={(exampleIndex) => {
+                      // Scroll to the example with this index
+                      const element = document.querySelector(`[data-example-index="${exampleIndex}"]`);
+                      element?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      // Highlight briefly
+                      element?.classList.add('ring-2', 'ring-primary');
+                      setTimeout(() => element?.classList.remove('ring-2', 'ring-primary'), 2000);
+                    }}
+                    onViewInValidationTab={(exampleIndex) => {
+                      // Switch to code validation tab
+                      setActiveTab('cc-code-ex');
+                      // Scroll to result after tab switch
+                      setTimeout(() => {
+                        const element = document.querySelector(`[data-result-index="${exampleIndex}"]`);
+                        element?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      }, 100);
+                    }}
                   />
                 )}
               </div>

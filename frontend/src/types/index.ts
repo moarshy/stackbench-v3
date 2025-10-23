@@ -10,6 +10,11 @@ export interface APISignature {
   line: number;
   context: string;
   raw_code: string;
+
+  // NEW FIELDS - Better association
+  section_hierarchy?: string[];
+  markdown_anchor?: string | null;
+  code_block_index?: number;
 }
 
 export interface CodeExample {
@@ -22,6 +27,12 @@ export interface CodeExample {
   line: number;
   context: string;
   dependencies: string[];
+
+  // NEW FIELDS - Better association
+  section_hierarchy?: string[];
+  markdown_anchor?: string | null;
+  code_block_index?: number;
+  snippet_source?: string | null;
 }
 
 export interface ExtractionOutput {
@@ -206,6 +217,10 @@ export interface CCExampleValidationResult {
   suggestions: string | null;
   execution_output: string | null;
   depends_on_previous: boolean;
+
+  // NEW FIELDS - Better dependency tracking
+  depends_on_example_indices?: number[];
+  actual_code_executed?: string | null;
 }
 
 export interface CCCodeExampleValidationOutput {
