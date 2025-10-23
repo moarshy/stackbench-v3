@@ -165,6 +165,7 @@ Critical requirements:
   - Generate the markdown anchor for the section (e.g., "#quick-start")
   - Count code blocks within each section (0 for first, 1 for second, etc.)
   - If code comes from a snippet include (--8<--), set snippet_source to {{"file": "path/to/file.py", "tags": ["tag1", "tag2"]}}, otherwise null
+- **IMPORTANT**: code_block_index MUST be an integer (use 0 if you cannot determine the index), NEVER null
 """
 
 
@@ -479,7 +480,20 @@ class DocumentationExtractionAgent:
             except Exception as e:
                 warnings.append(f"Failed to parse into Pydantic models: {e}")
                 print(f"   ⚠️  Pydantic validation error: {e}")
-                
+
+                # Log validation failure to messages.jsonl
+                if messages_log_file:
+                    validation_failure_message = {
+                        "timestamp": datetime.now().isoformat(),
+                        "role": "system",
+                        "content": [{
+                            "type": "text",
+                            "text": f"Pydantic validation failed for extracted data. Falling back to empty result. Error: {str(e)[:500]}"
+                        }]
+                    }
+                    with open(messages_log_file, 'a') as f:
+                        f.write(json.dumps(validation_failure_message) + '\n')
+
                 # Fallback to basic parsing
                 processing_time = int((datetime.now() - start_time).total_seconds() * 1000)
                 return DocumentAnalysis(
