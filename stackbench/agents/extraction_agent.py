@@ -148,7 +148,7 @@ Respond with a JSON object matching this exact schema:
       "section_hierarchy": ["Getting Started", "Quick Start"],
       "markdown_anchor": "#quick-start",
       "code_block_index": 1,
-      "snippet_source": null
+      "snippet_source": {{"file": "examples/quickstart.py", "tags": ["hello_world"]}}  // or null if not from snippet
     }}
   ]
 }}
@@ -164,7 +164,7 @@ Critical requirements:
   - Track the full heading hierarchy (e.g., ["Getting Started", "Quick Start"])
   - Generate the markdown anchor for the section (e.g., "#quick-start")
   - Count code blocks within each section (0 for first, 1 for second, etc.)
-  - If code comes from a snippet include (--8<--), record the source file and tag
+  - If code comes from a snippet include (--8<--), set snippet_source to {{"file": "path/to/file.py", "tags": ["tag1", "tag2"]}}, otherwise null
 """
 
 

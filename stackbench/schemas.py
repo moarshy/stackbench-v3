@@ -14,6 +14,12 @@ from typing import List, Dict, Any, Optional
 # EXTRACTION SCHEMAS
 # ============================================================================
 
+class SnippetSource(BaseModel):
+    """Source information for snippet includes (--8<-- directives)."""
+    file: str = Field(description="Source file path, e.g., 'python/python/test_file.py'")
+    tags: List[str] = Field(default_factory=list, description="Snippet tags/labels, e.g., ['connect_to_lancedb']")
+
+
 class APISignature(BaseModel):
     """Represents an API signature found in documentation."""
     library: str = Field(description="Library/package name")
@@ -49,7 +55,7 @@ class CodeExample(BaseModel):
     section_hierarchy: List[str] = Field(default_factory=list, description="Hierarchical section path, e.g., ['Create & Query', 'From Polars DataFrame', 'Sync API']")
     markdown_anchor: Optional[str] = Field(None, description="Markdown heading anchor/ID, e.g., '#from-polars-dataframe'")
     code_block_index: int = Field(0, description="Index of code block within the section (0, 1, 2...)")
-    snippet_source: Optional[str] = Field(None, description="If from snippet include (--8<--), the source reference, e.g., 'test_python.py:import-lancedb'")
+    snippet_source: Optional[SnippetSource] = Field(None, description="If from snippet include (--8<--), the source file and tags")
 
 
 class ExtractionResult(BaseModel):

@@ -20,6 +20,7 @@ from .clarity_agent import (
 
 # Import schemas from central location for backward compatibility
 from stackbench.schemas import (
+    SnippetSource,
     APISignature,
     CodeExample,
     DocumentAnalysis,
@@ -40,6 +41,7 @@ from stackbench.schemas import (
 __all__ = [
     # Extraction
     "DocumentationExtractionAgent",
+    "SnippetSource",
     "APISignature",
     "CodeExample",
     "DocumentAnalysis",
