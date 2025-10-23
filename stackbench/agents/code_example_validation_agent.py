@@ -323,6 +323,19 @@ class ValidationAgent:
         )
 
         if not examples:
+            # Log early return decision
+            if messages_log_file:
+                early_return_message = {
+                    "timestamp": datetime.now().isoformat(),
+                    "role": "system",
+                    "content": [{
+                        "type": "text",
+                        "text": f"Document '{page}' has 0 code examples. Skipping Claude invocation and returning empty validation result."
+                    }]
+                }
+                with open(messages_log_file, 'w') as f:
+                    f.write(json.dumps(early_return_message) + '\n')
+
             return DocumentValidationResult(
                 page=page,
                 library=library,
@@ -378,7 +391,9 @@ class ValidationAgent:
                 error_message=val_result.get("error_message"),
                 suggestions=val_result.get("suggestions"),
                 execution_output=val_result.get("execution_output"),
-                depends_on_previous=val_result.get("depends_on_previous", False)
+                depends_on_previous=val_result.get("depends_on_previous", False),
+                depends_on_example_indices=val_result.get("depends_on_example_indices", []),
+                actual_code_executed=val_result.get("actual_code_executed")
             ))
 
         # Count results

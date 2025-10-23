@@ -447,6 +447,19 @@ class APISignatureValidationAgent:
         )
 
         if not signatures:
+            # Log early return decision
+            if messages_log_file:
+                early_return_message = {
+                    "timestamp": datetime.now().isoformat(),
+                    "role": "system",
+                    "content": [{
+                        "type": "text",
+                        "text": f"Document '{document_page}' has 0 API signatures. Skipping Claude invocation and returning empty validation result."
+                    }]
+                }
+                with open(messages_log_file, 'w') as f:
+                    f.write(json.dumps(early_return_message) + '\n')
+
             # Return empty result
             processing_time = int((datetime.now() - start_time).total_seconds() * 1000)
             return APISignatureValidationOutput(

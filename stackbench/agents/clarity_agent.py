@@ -172,8 +172,8 @@ def create_clarity_validation_prompt(
 - ❌ Invalid: {len(invalid)} - parameter mismatches or wrong defaults
 - ⚠️  Not Found: {len(not_found)} - documented APIs that don't exist in the library
 
-{f"Invalid signatures: {', '.join(f'{r.get("function", "unknown")}()' for r in invalid[:5])}" if invalid else ""}
-{f"Not found: {', '.join(f'{r.get("function", "unknown")}()' for r in not_found[:5])}" if not_found else ""}
+{"Invalid signatures: " + ', '.join(f"{r.get('function', 'unknown')}()" for r in invalid[:5]) if invalid else ""}
+{"Not found: " + ', '.join(f"{r.get('function', 'unknown')}()" for r in not_found[:5]) if not_found else ""}
 """
     else:
         api_summary = "**API Validation:** Not available for this document"
