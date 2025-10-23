@@ -14,6 +14,71 @@ interface MarkdownViewerProps {
   onViewInValidationTab?: (exampleIndex: number) => void;
 }
 
+/**
+ * Normalize code string for comparison by removing extra whitespace
+ * and normalizing line endings.
+ */
+function normalizeCode(code: string): string {
+  return code
+    .trim()
+    .replace(/\r\n/g, '\n')
+    .replace(/^\s+/gm, '') // Remove leading whitespace from each line
+    .replace(/\s+$/gm, '') // Remove trailing whitespace from each line
+    .replace(/\n+/g, '\n'); // Normalize multiple newlines to single
+}
+
+/**
+ * Preprocess markdown to remove MkDocs Material syntax and fix indentation issues
+ * This handles tab markers like === "Sync API" and normalizes code block indentation
+ */
+function preprocessMarkdown(content: string): string {
+  const lines = content.split('\n');
+  const result: string[] = [];
+  let inCodeBlock = false;
+  let codeBlockIndent = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // Skip MkDocs Material tab markers (=== "Tab Name")
+    if (line.match(/^===\s+"[^"]+"\s*$/)) {
+      continue;
+    }
+
+    // Detect code fence
+    if (line.trim().startsWith('```')) {
+      inCodeBlock = !inCodeBlock;
+
+      if (inCodeBlock) {
+        // Starting code block - detect indentation level
+        codeBlockIndent = line.search(/\S/);
+        // Remove indentation from fence and add it without indentation
+        result.push(line.trim());
+      } else {
+        // Ending code block
+        result.push('```');
+        codeBlockIndent = 0;
+      }
+      continue;
+    }
+
+    // Process code block content
+    if (inCodeBlock) {
+      // Remove the base indentation level from code block
+      if (line.startsWith(' '.repeat(codeBlockIndent))) {
+        result.push(line.substring(codeBlockIndent));
+      } else {
+        result.push(line);
+      }
+    } else {
+      // Regular content - keep as-is
+      result.push(line);
+    }
+  }
+
+  return result.join('\n');
+}
+
 export function MarkdownViewer({
   content,
   baseImagePath,
@@ -21,17 +86,20 @@ export function MarkdownViewer({
   onExampleClick,
   onViewInValidationTab
 }: MarkdownViewerProps) {
-  // Build a map: line number -> validation result
+  // Preprocess markdown to remove MkDocs syntax and fix indentation
+  const processedContent = useMemo(() => preprocessMarkdown(content), [content]);
+
+  // Build a map: normalized code -> validation result for fast lookup
   const validationMap = useMemo(() => {
     const map = new Map();
     codeValidation?.results.forEach(result => {
-      map.set(result.line, result);
+      if (result.code) {
+        const normalized = normalizeCode(result.code);
+        map.set(normalized, result);
+      }
     });
     return map;
   }, [codeValidation]);
-
-  // Track line numbers for code blocks
-  let currentLine = 1;
 
   return (
     <div className="prose prose-sm max-w-none dark:prose-invert">
@@ -56,20 +124,22 @@ export function MarkdownViewer({
             );
           },
           // Enhanced code block rendering with validation
-          code: ({ node, inline, className, children, ...props }) => {
-            if (inline) {
+          code: ({ node, className, children, ...props }) => {
+            // Check if this is an inline code element by checking if it's inside a paragraph
+            const isInline = !className || !className.startsWith('language-');
+
+            if (isInline) {
               return <code className="bg-muted px-1.5 py-0.5 rounded text-sm" {...props}>{children}</code>;
             }
 
             // Get code content
             const codeString = String(children).replace(/\n$/, '');
 
-            // Try to get validation data for this code block
-            // Note: This is a simplified approach - we're matching by code content
-            // In a real implementation, you might need to track line numbers more precisely
-            const validation = Array.from(validationMap.values()).find(
-              v => v.code && codeString.includes(v.code.substring(0, 50))
-            );
+            // Normalize the code for matching
+            const normalizedCode = normalizeCode(codeString);
+
+            // Look up validation by normalized code
+            const validation = validationMap.get(normalizedCode);
 
             if (validation) {
               // Has validation - render with annotation
@@ -128,7 +198,7 @@ export function MarkdownViewer({
           ),
         }}
       >
-        {content}
+        {processedContent}
       </ReactMarkdown>
     </div>
   );
