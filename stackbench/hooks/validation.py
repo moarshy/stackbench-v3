@@ -37,7 +37,7 @@ DOCUMENT_ANALYSIS_SCHEMA = {
     "nested_schemas": {
         "signatures": {
             "required_fields": ["library", "function", "params", "param_types", "defaults", "imports", "line", "context"],
-            "optional_fields": ["method_chain", "raw_code"],
+            "optional_fields": ["method_chain", "raw_code", "section_hierarchy", "markdown_anchor", "code_block_index"],
             "field_types": {
                 "library": str,
                 "function": str,
@@ -48,12 +48,15 @@ DOCUMENT_ANALYSIS_SCHEMA = {
                 "imports": str,
                 "line": int,
                 "context": str,
-                "raw_code": (str, type(None))
+                "raw_code": (str, type(None)),
+                "section_hierarchy": list,
+                "markdown_anchor": (str, type(None)),
+                "code_block_index": int
             }
         },
         "examples": {
             "required_fields": ["library", "language", "code", "has_main", "is_executable", "line", "context", "dependencies"],
-            "optional_fields": ["imports"],
+            "optional_fields": ["imports", "section_hierarchy", "markdown_anchor", "code_block_index", "snippet_source"],
             "field_types": {
                 "library": str,
                 "language": str,
@@ -63,7 +66,11 @@ DOCUMENT_ANALYSIS_SCHEMA = {
                 "is_executable": bool,
                 "line": int,
                 "context": str,
-                "dependencies": list
+                "dependencies": list,
+                "section_hierarchy": list,
+                "markdown_anchor": (str, type(None)),
+                "code_block_index": int,
+                "snippet_source": (str, type(None))
             }
         }
     }
@@ -154,7 +161,7 @@ CODE_EXAMPLE_VALIDATION_SCHEMA = {
     "nested_schemas": {
         "results": {
             "required_fields": ["example_index", "line", "context", "code", "status", "depends_on_previous"],
-            "optional_fields": ["error_message", "suggestions", "execution_output"],
+            "optional_fields": ["error_message", "suggestions", "execution_output", "depends_on_example_indices", "actual_code_executed"],
             "field_types": {
                 "example_index": int,
                 "line": int,
@@ -164,7 +171,9 @@ CODE_EXAMPLE_VALIDATION_SCHEMA = {
                 "error_message": (str, type(None)),
                 "suggestions": (str, type(None)),
                 "execution_output": (str, type(None)),
-                "depends_on_previous": bool
+                "depends_on_previous": bool,
+                "depends_on_example_indices": list,
+                "actual_code_executed": (str, type(None))
             }
         }
     }

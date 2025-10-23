@@ -42,6 +42,10 @@ class ExampleValidationResult(BaseModel):
     execution_output: Optional[str] = None
     depends_on_previous: bool = False
 
+    # NEW FIELDS - Better dependency tracking
+    depends_on_example_indices: List[int] = Field(default_factory=list, description="Specific example indices this depends on, e.g., [0, 2]")
+    actual_code_executed: Optional[str] = Field(None, description="Full code that was executed, including merged dependencies")
+
 
 class DocumentValidationResult(BaseModel):
     """Validation result for an entire document."""
@@ -93,6 +97,8 @@ TASK:
    - Check if it depends on previous examples (uses undefined variables)
    - If independent: Execute in fresh namespace
    - If dependent: Execute with accumulated state from previous examples
+   - **Track WHICH specific examples it depends on** (e.g., depends on examples [0, 2])
+   - **Save the FULL CODE that was actually executed** (including merged dependencies)
    - Capture output, errors, and suggestions
 4. Clean up the environment when done
 
@@ -108,7 +114,19 @@ RESPONSE FORMAT - JSON ONLY:
     "error_message": "error details if failed",
     "suggestions": "how to fix or improve",
     "execution_output": "stdout/stderr output",
-    "depends_on_previous": false
+    "depends_on_previous": false,
+    "depends_on_example_indices": [],
+    "actual_code_executed": "import lancedb\\ndb = lancedb.connect('data/sample-lancedb')"
+  }},
+  {{
+    "example_index": 2,
+    "status": "success",
+    "error_message": null,
+    "suggestions": "Code depends on Example 0 for 'db' variable",
+    "execution_output": "Table created successfully",
+    "depends_on_previous": true,
+    "depends_on_example_indices": [0],
+    "actual_code_executed": "import lancedb\\ndb = lancedb.connect('data/sample-lancedb')\\nimport polars as pl\\ndata = pl.DataFrame(...)\\ntable = db.create_table('pl_table', data=data)"
   }}
 ]
 ```
@@ -117,6 +135,9 @@ IMPORTANT:
 - Use actual Bash tool execution to run the code
 - Create virtualenv, install packages, execute code
 - Report actual execution results
+- For dependency tracking:
+  - `depends_on_example_indices` must list specific example numbers (e.g., [0, 1] means depends on examples 0 and 1)
+  - `actual_code_executed` must show the COMPLETE code that was run (if you merged multiple examples, include all of them)
 - Respond with ONLY the JSON array, no other text"""
 
 

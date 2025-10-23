@@ -118,7 +118,10 @@ Respond with a JSON object matching this exact schema:
       "imports": "from fastapi import FastAPI",
       "line": 45,
       "context": "Creating Applications",
-      "raw_code": "app = FastAPI(title='My API', version='1.0.0')"
+      "raw_code": "app = FastAPI(title='My API', version='1.0.0')",
+      "section_hierarchy": ["Getting Started", "Creating Applications"],
+      "markdown_anchor": "#creating-applications",
+      "code_block_index": 0
     }}
   ],
   "examples": [
@@ -131,7 +134,11 @@ Respond with a JSON object matching this exact schema:
       "is_executable": true,
       "line": 67,
       "context": "Quick Start",
-      "dependencies": ["fastapi"]
+      "dependencies": ["fastapi"],
+      "section_hierarchy": ["Getting Started", "Quick Start"],
+      "markdown_anchor": "#quick-start",
+      "code_block_index": 1,
+      "snippet_source": null
     }}
   ]
 }}
@@ -143,6 +150,11 @@ Critical requirements:
 - If you cannot resolve a snippet, note it in warnings but still try to extract what you can
 - Extract ALL parameters including optional ones with defaults
 - Be comprehensive - extract EVERYTHING, don't skip anything
+- For each signature and example, capture its location context:
+  - Track the full heading hierarchy (e.g., ["Getting Started", "Quick Start"])
+  - Generate the markdown anchor for the section (e.g., "#quick-start")
+  - Count code blocks within each section (0 for first, 1 for second, etc.)
+  - If code comes from a snippet include (--8<--), record the source file and tag
 """
 
 
@@ -163,6 +175,11 @@ class APISignature(BaseModel):
     context: str = Field(description="Section/heading this appears under")
     raw_code: Optional[str] = Field(None, description="Exact code snippet showing the signature")
 
+    # NEW FIELDS - Better association
+    section_hierarchy: List[str] = Field(default_factory=list, description="Hierarchical section path, e.g., ['Create & Query', 'From Polars DataFrame', 'Sync API']")
+    markdown_anchor: Optional[str] = Field(None, description="Markdown heading anchor/ID, e.g., '#from-polars-dataframe'")
+    code_block_index: int = Field(0, description="Index of code block within the section (0, 1, 2...)")
+
 
 class CodeExample(BaseModel):
     """Represents a code example found in documentation."""
@@ -175,6 +192,12 @@ class CodeExample(BaseModel):
     line: int = Field(description="Approximate line number in document")
     context: str = Field(description="Section/heading this appears under")
     dependencies: List[str] = Field(default_factory=list, description="External dependencies needed")
+
+    # NEW FIELDS - Better association
+    section_hierarchy: List[str] = Field(default_factory=list, description="Hierarchical section path, e.g., ['Create & Query', 'From Polars DataFrame', 'Sync API']")
+    markdown_anchor: Optional[str] = Field(None, description="Markdown heading anchor/ID, e.g., '#from-polars-dataframe'")
+    code_block_index: int = Field(0, description="Index of code block within the section (0, 1, 2...)")
+    snippet_source: Optional[str] = Field(None, description="If from snippet include (--8<--), the source reference, e.g., 'test_python.py:import-lancedb'")
 
 
 class ExtractionResult(BaseModel):
