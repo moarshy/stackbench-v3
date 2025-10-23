@@ -2,27 +2,32 @@
 
 from .extraction_agent import (
     DocumentationExtractionAgent,
-    APISignature,
-    CodeExample,
-    DocumentAnalysis,
     ExtractionSummary,
 )
 
 from .api_signature_validation_agent import (
     APISignatureValidationAgent,
-    ValidationOutput,
-    SignatureValidation,
-    ValidationSummary,
 )
 
 from .code_example_validation_agent import (
     ValidationAgent as CodeExampleValidationAgent,
-    DocumentValidationResult,
 )
 
 from .clarity_agent import (
     DocumentationClarityAgent,
-    DocumentClarityAnalysis,
+    ClarityValidationSummary,
+)
+
+# Import schemas from central location for backward compatibility
+from stackbench.schemas import (
+    APISignature,
+    CodeExample,
+    DocumentAnalysis,
+    DocumentValidationResult,
+    APISignatureValidationOutput,
+    SignatureValidation,
+    ValidationSummary,
+    ClarityValidationOutput,
     ClarityIssue,
     StructuralIssue,
     ClarityScore,
@@ -30,7 +35,6 @@ from .clarity_agent import (
     BrokenLink,
     MissingAltText,
     CodeBlockIssue,
-    ClarityValidationSummary,
 )
 
 __all__ = [
@@ -42,7 +46,7 @@ __all__ = [
     "ExtractionSummary",
     # API Signature Validation
     "APISignatureValidationAgent",
-    "ValidationOutput",
+    "APISignatureValidationOutput",
     "SignatureValidation",
     "ValidationSummary",
     # Code Example Validation
@@ -50,7 +54,7 @@ __all__ = [
     "DocumentValidationResult",
     # Clarity Validation
     "DocumentationClarityAgent",
-    "DocumentClarityAnalysis",
+    "ClarityValidationOutput",
     "ClarityIssue",
     "StructuralIssue",
     "ClarityScore",

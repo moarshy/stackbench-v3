@@ -24,6 +24,16 @@ from claude_agent_sdk import (
 from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv())
 
+# Import centralized schemas
+from stackbench.schemas import (
+    APISignature,
+    CodeExample,
+    ExtractionResult,
+    DocumentAnalysis,
+    ExtractionSummary
+)
+from stackbench.utils import pydantic_to_json_example
+
 
 
 # ============================================================================
@@ -162,78 +172,8 @@ Critical requirements:
 # PYDANTIC MODELS
 # ============================================================================
 
-class APISignature(BaseModel):
-    """Represents an API signature found in documentation."""
-    library: str = Field(description="Library/package name")
-    function: str = Field(description="Function/class/method name")
-    method_chain: Optional[str] = Field(None, description="Chained method calls if applicable")
-    params: List[str] = Field(default_factory=list, description="Parameter names")
-    param_types: Dict[str, str] = Field(default_factory=dict, description="Parameter types")
-    defaults: Dict[str, Any] = Field(default_factory=dict, description="Default values")
-    imports: str = Field(description="Import statement needed")
-    line: int = Field(description="Approximate line number in document")
-    context: str = Field(description="Section/heading this appears under")
-    raw_code: Optional[str] = Field(None, description="Exact code snippet showing the signature")
-
-    # NEW FIELDS - Better association
-    section_hierarchy: List[str] = Field(default_factory=list, description="Hierarchical section path, e.g., ['Create & Query', 'From Polars DataFrame', 'Sync API']")
-    markdown_anchor: Optional[str] = Field(None, description="Markdown heading anchor/ID, e.g., '#from-polars-dataframe'")
-    code_block_index: int = Field(0, description="Index of code block within the section (0, 1, 2...)")
-
-
-class CodeExample(BaseModel):
-    """Represents a code example found in documentation."""
-    library: str = Field(description="Primary library being demonstrated")
-    language: str = Field(description="Programming language")
-    code: str = Field(description="Complete code example")
-    imports: Optional[str] = Field(None, description="All import statements")
-    has_main: bool = Field(description="Whether example has a main/entry point")
-    is_executable: bool = Field(description="Whether example can run standalone")
-    line: int = Field(description="Approximate line number in document")
-    context: str = Field(description="Section/heading this appears under")
-    dependencies: List[str] = Field(default_factory=list, description="External dependencies needed")
-
-    # NEW FIELDS - Better association
-    section_hierarchy: List[str] = Field(default_factory=list, description="Hierarchical section path, e.g., ['Create & Query', 'From Polars DataFrame', 'Sync API']")
-    markdown_anchor: Optional[str] = Field(None, description="Markdown heading anchor/ID, e.g., '#from-polars-dataframe'")
-    code_block_index: int = Field(0, description="Index of code block within the section (0, 1, 2...)")
-    snippet_source: Optional[str] = Field(None, description="If from snippet include (--8<--), the source reference, e.g., 'test_python.py:import-lancedb'")
-
-
-class ExtractionResult(BaseModel):
-    """Result of extracting information from documentation."""
-    library: str = Field(description="Primary library/framework name")
-    version: Optional[str] = Field(None, description="Library version if mentioned")
-    language: str = Field(description="Programming language")
-    signatures: List[APISignature] = Field(default_factory=list, description="All API signatures found")
-    examples: List[CodeExample] = Field(default_factory=list, description="All code examples found")
-
-
-class DocumentAnalysis(BaseModel):
-    """Complete analysis of a documentation file."""
-    page: str = Field(description="Filename of the documentation page")
-    library: str = Field(description="Primary library name")
-    version: Optional[str] = Field(None, description="Library version")
-    language: str = Field(description="Programming language")
-    signatures: List[APISignature] = Field(default_factory=list, description="API signatures")
-    examples: List[CodeExample] = Field(default_factory=list, description="Code examples")
-    processed_at: str = Field(description="ISO timestamp of processing")
-    total_signatures: int = Field(description="Count of signatures found")
-    total_examples: int = Field(description="Count of examples found")
-    warnings: List[str] = Field(default_factory=list, description="Any warnings or issues")
-    processing_time_ms: Optional[int] = Field(None, description="Time taken to process")
-
-
-class ExtractionSummary(BaseModel):
-    """Summary of all extraction results."""
-    total_documents: int = Field(description="Total markdown files found")
-    processed: int = Field(description="Successfully processed documents")
-    total_signatures: int = Field(description="Total signatures across all docs")
-    total_examples: int = Field(description="Total examples across all docs")
-    timestamp: str = Field(description="ISO timestamp of summary generation")
-    extraction_duration_seconds: Optional[float] = Field(None, description="Total time taken for extraction in seconds")
-    num_workers: Optional[int] = Field(None, description="Number of parallel workers used")
-    documents: List[DocumentAnalysis] = Field(default_factory=list, description="All document analyses")
+# All Pydantic models are now imported from stackbench.schemas
+# This eliminates duplication and ensures consistency across all agents
 
 
 # ============================================================================

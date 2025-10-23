@@ -19,255 +19,29 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions, AssistantMessage, TextBlock
 
+# Import centralized schemas
+from stackbench.schemas import (
+    ClarityValidationOutput,
+    ClarityIssue,
+    StructuralIssue,
+    ClarityScore,
+    ClaritySummary,
+    TechnicalAccessibility,
+    BrokenLink,
+    MissingAltText,
+    CodeBlockIssue
+)
+
 console = Console()
 
 
 # ============================================================================
-# Pydantic Models (Output JSON Schema)
+# All Pydantic models are now imported from stackbench.schemas
+# This eliminates duplication and ensures consistency across all agents
 # ============================================================================
 
-class ClarityIssue(BaseModel):
-    """A clarity or instructional quality issue found in documentation."""
-
-    type: str = Field(
-        description="Issue type: missing_prerequisite, logical_gap, unclear_explanation, "
-                    "terminology_inconsistency, ambiguous_reference, missing_context, "
-                    "assumption_of_knowledge, incomplete_step"
-    )
-
-    severity: str = Field(
-        description="Severity: critical (blocks progress), warning (causes confusion), "
-                    "info (nice-to-have improvement)"
-    )
-
-    line: int = Field(
-        description="Approximate line number in original markdown document where issue occurs"
-    )
-
-    section: str = Field(
-        description="Section or heading where issue appears (e.g., 'Quickstart Guide', 'Configuration')"
-    )
-
-    step_number: Optional[int] = Field(
-        None,
-        description="Step number if this is part of a sequential tutorial (e.g., Step 3 of 5)"
-    )
-
-    message: str = Field(
-        description="Clear, actionable description of the issue"
-    )
-
-    suggested_fix: Optional[str] = Field(
-        None,
-        description="Specific suggestion for how to improve the documentation"
-    )
-
-    affected_code: Optional[str] = Field(
-        None,
-        description="Code snippet related to this issue (if applicable)"
-    )
-
-    context_quote: Optional[str] = Field(
-        None,
-        description="Quote from documentation showing the problematic text"
-    )
-
-
-class StructuralIssue(BaseModel):
-    """A structural or organizational issue in documentation."""
-
-    type: str = Field(
-        description="Issue type: missing_prerequisites_section, buried_prerequisites, "
-                    "missing_step_numbers, inconsistent_section_organization, "
-                    "no_difficulty_indicator, no_time_estimate, missing_toc, "
-                    "poor_heading_hierarchy"
-    )
-
-    severity: str = Field(
-        description="Severity: critical, warning, info"
-    )
-
-    location: str = Field(
-        description="Where in document this occurs (e.g., 'Prerequisites mentioned in Step 5', "
-                    "'No step numbers in Installation section')"
-    )
-
-    message: str = Field(
-        description="Clear description of the structural problem"
-    )
-
-    suggested_fix: Optional[str] = Field(
-        None,
-        description="How to improve the document structure"
-    )
-
-
-class ClarityScore(BaseModel):
-    """Rubric-based clarity evaluation scores (0.0-10.0 scale)."""
-
-    overall_score: float = Field(
-        ge=0.0, le=10.0,
-        description="Overall clarity score (average of dimension scores)"
-    )
-
-    instruction_clarity: float = Field(
-        ge=0.0, le=10.0,
-        description="How clear and actionable are the instructions? "
-                    "10=perfect clarity, 0=completely unclear"
-    )
-
-    logical_flow: float = Field(
-        ge=0.0, le=10.0,
-        description="Do steps build logically on each other? "
-                    "10=perfect progression, 0=complete disconnection"
-    )
-
-    completeness: float = Field(
-        ge=0.0, le=10.0,
-        description="Are all necessary details included? "
-                    "10=nothing missing, 0=critical gaps everywhere"
-    )
-
-    consistency: float = Field(
-        ge=0.0, le=10.0,
-        description="Is terminology and style consistent throughout? "
-                    "10=perfect consistency, 0=constant inconsistencies"
-    )
-
-    prerequisite_coverage: float = Field(
-        ge=0.0, le=10.0,
-        description="Are prerequisites clearly stated and complete? "
-                    "10=all prereqs upfront, 0=no prereq info"
-    )
-
-    evaluation_criteria: dict = Field(
-        description="Explanation of what was measured for each dimension"
-    )
-
-    scoring_rationale: Optional[str] = Field(
-        None,
-        description="Overall explanation of scores"
-    )
-
-
-class BrokenLink(BaseModel):
-    """A broken link found in documentation."""
-    url: str
-    line: int
-    link_text: str
-    error: str  # "404 Not Found", "Connection timeout", etc.
-
-
-class MissingAltText(BaseModel):
-    """An image without alt text."""
-    image_path: str
-    line: int
-
-
-class CodeBlockIssue(BaseModel):
-    """A code block without language specification."""
-    line: int
-    content_preview: str  # First 50 chars
-
-
-class TechnicalAccessibility(BaseModel):
-    """Technical accessibility validation results."""
-
-    broken_links: list[BrokenLink] = Field(
-        default_factory=list,
-        description="All broken links found (404s, timeouts, etc.)"
-    )
-
-    missing_alt_text: list[MissingAltText] = Field(
-        default_factory=list,
-        description="Images without alt text"
-    )
-
-    code_blocks_without_language: list[CodeBlockIssue] = Field(
-        default_factory=list,
-        description="Code blocks missing language specification"
-    )
-
-    total_links_checked: int = Field(
-        description="Total number of links validated"
-    )
-
-    total_images_checked: int = Field(
-        description="Total number of images validated"
-    )
-
-    total_code_blocks_checked: int = Field(
-        description="Total number of code blocks validated"
-    )
-
-    all_validated: bool = Field(
-        description="Whether all technical checks passed"
-    )
-
-
-class DocumentClarityAnalysis(BaseModel):
-    """Complete clarity and structure analysis for a documentation file."""
-
-    validation_id: str = Field(
-        description="Unique UUID for this validation run"
-    )
-
-    validated_at: str = Field(
-        description="ISO timestamp of when validation occurred"
-    )
-
-    source_file: str = Field(
-        description="Source extraction file (e.g., 'quickstart_analysis.json')"
-    )
-
-    document_page: str = Field(
-        description="Original markdown filename (e.g., 'quickstart.md')"
-    )
-
-    library: str = Field(
-        description="Library being documented"
-    )
-
-    version: str = Field(
-        description="Library version"
-    )
-
-    language: str = Field(
-        description="Programming language (python, javascript, etc.)"
-    )
-
-    clarity_score: ClarityScore = Field(
-        description="Numerical clarity scores across dimensions"
-    )
-
-    clarity_issues: list[ClarityIssue] = Field(
-        default_factory=list,
-        description="All clarity and instructional issues found"
-    )
-
-    structural_issues: list[StructuralIssue] = Field(
-        default_factory=list,
-        description="All structural and organizational issues found"
-    )
-
-    technical_accessibility: TechnicalAccessibility = Field(
-        description="Technical validation results (links, images, code blocks)"
-    )
-
-    summary: dict = Field(
-        description="Summary statistics: total_issues, critical_issues, warnings, info, etc."
-    )
-
-    processing_time_ms: int = Field(
-        description="Time taken to analyze this document in milliseconds"
-    )
-
-    warnings: list[str] = Field(
-        default_factory=list,
-        description="Any warnings during analysis"
-    )
-
-
+# Note: ClarityValidationSummary is a summary across documents, used only in this agent
+# (not part of the output schema for individual documents)
 class ClarityValidationSummary(BaseModel):
     """Summary of clarity validation across all documents."""
 
@@ -854,7 +628,7 @@ class DocumentationClarityAgent:
 
         return response_text
 
-    async def analyze_document(self, extraction_file: Path) -> Optional[DocumentClarityAnalysis]:
+    async def analyze_document(self, extraction_file: Path) -> Optional[ClarityValidationOutput]:
         """
         Analyze clarity and structure of a single document.
 
@@ -862,7 +636,7 @@ class DocumentationClarityAgent:
             extraction_file: Path to extraction JSON file
 
         Returns:
-            DocumentClarityAnalysis with all clarity evaluation results, or None if failed
+            ClarityValidationOutput with all clarity evaluation results, or None if failed
         """
         start_time = datetime.now()
 
@@ -961,8 +735,8 @@ class DocumentationClarityAgent:
                 # Combine snippet warnings with agent warnings
                 all_warnings = snippet_warnings + clarity_data.get('warnings', [])
 
-                # Construct DocumentClarityAnalysis
-                analysis = DocumentClarityAnalysis(
+                # Construct ClarityValidationOutput
+                analysis = ClarityValidationOutput(
                     validation_id=str(uuid4()),
                     validated_at=datetime.utcnow().isoformat() + 'Z',
                     source_file=extraction_file.name,
@@ -1014,7 +788,7 @@ class DocumentationClarityAgent:
         semaphore: asyncio.Semaphore,
         progress: Optional[Progress] = None,
         task: Optional[Any] = None
-    ) -> Optional[DocumentClarityAnalysis]:
+    ) -> Optional[ClarityValidationOutput]:
         """
         Worker method for parallel processing with semaphore.
 
@@ -1025,7 +799,7 @@ class DocumentationClarityAgent:
             task: Optional progress task
 
         Returns:
-            DocumentClarityAnalysis or None
+            ClarityValidationOutput or None
         """
         async with semaphore:
             result = await self.analyze_document(extraction_file)

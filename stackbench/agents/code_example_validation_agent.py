@@ -25,40 +25,16 @@ from claude_agent_sdk import (
 from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv())
 
+# Import centralized schemas
+from stackbench.schemas import ExampleValidationResult, DocumentValidationResult
+
 
 # ============================================================================
 # PYDANTIC MODELS
 # ============================================================================
 
-class ExampleValidationResult(BaseModel):
-    """Validation result for a single code example."""
-    example_index: int
-    line: int
-    context: str
-    code: str
-    status: str = Field(description="success|failure|skipped")
-    error_message: Optional[str] = None
-    suggestions: Optional[str] = None
-    execution_output: Optional[str] = None
-    depends_on_previous: bool = False
-
-    # NEW FIELDS - Better dependency tracking
-    depends_on_example_indices: List[int] = Field(default_factory=list, description="Specific example indices this depends on, e.g., [0, 2]")
-    actual_code_executed: Optional[str] = Field(None, description="Full code that was executed, including merged dependencies")
-
-
-class DocumentValidationResult(BaseModel):
-    """Validation result for an entire document."""
-    page: str
-    library: str
-    version: str
-    language: str
-    validation_timestamp: str
-    results: List[ExampleValidationResult]
-    total_examples: int
-    successful: int
-    failed: int
-    skipped: int
+# All Pydantic models are now imported from stackbench.schemas
+# This eliminates duplication and ensures consistency across all agents
 
 
 # ============================================================================

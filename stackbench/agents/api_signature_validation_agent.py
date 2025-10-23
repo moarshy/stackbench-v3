@@ -28,92 +28,22 @@ from claude_agent_sdk import (
 from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv())
 
+# Import centralized schemas
+from stackbench.schemas import (
+    APISignatureValidationOutput,
+    SignatureValidation,
+    DocumentedSignature,
+    ActualSignature,
+    ValidationIssue,
+    ValidationSummary,
+    EnvironmentInfo
+)
+
 
 # ============================================================================
-# PYDANTIC MODELS - Validation Output Schema
+# All Pydantic models are now imported from stackbench.schemas
+# This eliminates duplication and ensures consistency across all agents
 # ============================================================================
-
-class DocumentedSignature(BaseModel):
-    """Signature as documented in the docs."""
-    params: List[str] = Field(default_factory=list, description="Parameter names from docs")
-    param_types: Dict[str, str] = Field(default_factory=dict, description="Parameter types from docs")
-    defaults: Dict[str, Any] = Field(default_factory=dict, description="Default values from docs")
-    imports: str = Field(description="Import statement from docs")
-    raw_code: str = Field(description="Raw code snippet from docs")
-    line: int = Field(description="Line number in documentation")
-    context: str = Field(description="Context/section from docs")
-
-
-class ActualSignature(BaseModel):
-    """Actual signature found in the library via introspection."""
-    params: List[str] = Field(default_factory=list, description="Actual parameter names")
-    param_types: Dict[str, str] = Field(default_factory=dict, description="Actual parameter types")
-    defaults: Dict[str, Any] = Field(default_factory=dict, description="Actual default values")
-    required_params: List[str] = Field(default_factory=list, description="Required parameters")
-    optional_params: List[str] = Field(default_factory=list, description="Optional parameters")
-    return_type: Optional[str] = Field(None, description="Return type if available")
-    is_async: bool = Field(False, description="Whether function is async")
-    is_method: bool = Field(False, description="Whether this is a method")
-    verified_by: str = Field(description="How signature was verified (inspect.signature, help, source)")
-
-
-class ValidationIssue(BaseModel):
-    """An issue found during validation."""
-    type: str = Field(description="Issue type: parameter_mismatch, missing_param_in_docs, extra_param_in_docs, type_mismatch, default_mismatch, not_found")
-    severity: str = Field(description="Severity: critical, warning, info")
-    message: str = Field(description="Clear description of the issue")
-    suggested_fix: Optional[str] = Field(None, description="Suggestion for how to fix the documentation")
-
-
-class SignatureValidation(BaseModel):
-    """Validation result for a single API signature."""
-    signature_id: str = Field(description="Unique identifier (library.function)")
-    function: str = Field(description="Function/method name")
-    method_chain: Optional[str] = Field(None, description="Method chain if applicable (e.g., 'db.create_table')")
-    library: str = Field(description="Library name")
-    status: str = Field(description="Validation status: valid, invalid, not_found, error")
-    documented: DocumentedSignature = Field(description="Documented signature from extraction")
-    actual: Optional[ActualSignature] = Field(None, description="Actual signature from library")
-    issues: List[ValidationIssue] = Field(default_factory=list, description="Issues found")
-    confidence: float = Field(1.0, description="Confidence in validation (0.0-1.0)")
-
-
-class ValidationSummary(BaseModel):
-    """Summary statistics for validation."""
-    total_signatures: int = Field(description="Total signatures validated")
-    valid: int = Field(description="Number of valid signatures (exact match)")
-    invalid: int = Field(description="Number of invalid signatures (has issues)")
-    not_found: int = Field(description="Number of signatures not found in library")
-    error: int = Field(description="Number of validation errors")
-    accuracy_score: float = Field(description="Percentage of valid signatures (valid/total)")
-    critical_issues: int = Field(description="Number of critical issues found")
-    warnings: int = Field(description="Number of warnings found")
-
-
-class EnvironmentInfo(BaseModel):
-    """Information about the validation environment."""
-    library_installed: str = Field(description="Library that was installed")
-    version_installed: str = Field(description="Version that was installed")
-    version_requested: str = Field(description="Version from extraction")
-    version_match: bool = Field(description="Whether versions match")
-    python_version: str = Field(description="Python version used")
-    installation_output: Optional[str] = Field(None, description="Output from pip install")
-
-
-class ValidationOutput(BaseModel):
-    """Complete validation output for a document."""
-    validation_id: str = Field(description="Unique ID for this validation run")
-    validated_at: str = Field(description="ISO timestamp of validation")
-    source_file: str = Field(description="Source extraction file name")
-    document_page: str = Field(description="Original documentation page")
-    library: str = Field(description="Library being validated")
-    version: str = Field(description="Library version")
-    language: str = Field(description="Programming language")
-    summary: ValidationSummary = Field(description="Summary statistics")
-    validations: List[SignatureValidation] = Field(default_factory=list, description="Individual validation results")
-    environment: EnvironmentInfo = Field(description="Environment information")
-    processing_time_ms: int = Field(description="Time taken to process")
-    warnings: List[str] = Field(default_factory=list, description="Any warnings during validation")
 
 
 # ============================================================================
@@ -458,7 +388,7 @@ class APISignatureValidationAgent:
             })
         return json.dumps(formatted, indent=2)
 
-    async def validate_document(self, extraction_file: Path) -> ValidationOutput:
+    async def validate_document(self, extraction_file: Path) -> APISignatureValidationOutput:
         """
         Validate all signatures in a document.
 
@@ -466,7 +396,7 @@ class APISignatureValidationAgent:
             extraction_file: Path to extraction JSON file
 
         Returns:
-            ValidationOutput with all validation results
+            APISignatureValidationOutput with all validation results
         """
         start_time = datetime.now()
 
@@ -519,7 +449,7 @@ class APISignatureValidationAgent:
         if not signatures:
             # Return empty result
             processing_time = int((datetime.now() - start_time).total_seconds() * 1000)
-            return ValidationOutput(
+            return APISignatureValidationOutput(
                 validation_id=str(uuid.uuid4()),
                 validated_at=datetime.now().isoformat(),
                 source_file=extraction_file.name,
@@ -566,7 +496,7 @@ class APISignatureValidationAgent:
                 warnings.append("Failed to parse validation response from Claude")
                 # Return error result
                 processing_time = int((datetime.now() - start_time).total_seconds() * 1000)
-                return ValidationOutput(
+                return APISignatureValidationOutput(
                     validation_id=str(uuid.uuid4()),
                     validated_at=datetime.now().isoformat(),
                     source_file=extraction_file.name,
@@ -686,7 +616,7 @@ class APISignatureValidationAgent:
 
             processing_time = int((datetime.now() - start_time).total_seconds() * 1000)
 
-            validation_output = ValidationOutput(
+            validation_output = APISignatureValidationOutput(
                 validation_id=str(uuid.uuid4()),
                 validated_at=datetime.now().isoformat(),
                 source_file=extraction_file.name,
@@ -729,7 +659,7 @@ class APISignatureValidationAgent:
         extraction_file: Path,
         semaphore: asyncio.Semaphore,
         progress: Dict[str, int]
-    ) -> Optional[ValidationOutput]:
+    ) -> Optional[APISignatureValidationOutput]:
         """Validate a single document with semaphore control and save results."""
         async with semaphore:
             try:

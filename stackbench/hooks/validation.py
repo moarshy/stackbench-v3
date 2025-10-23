@@ -1,8 +1,8 @@
 """
 Validation hooks for StackBench agents.
 
-Converted from shell script hooks to programmatic Python hooks for better
-integration, debugging, and type safety.
+Now uses Pydantic models directly for validation, eliminating manual schema duplication.
+The centralized schemas in stackbench.schemas are the single source of truth.
 """
 
 import json
@@ -10,284 +10,20 @@ from typing import Any, Dict, List, Optional
 from pathlib import Path
 from datetime import datetime
 
+# Import centralized schemas and utilities
+from stackbench.schemas import (
+    DocumentAnalysis,
+    DocumentValidationResult,
+    APISignatureValidationOutput,
+    ClarityValidationOutput
+)
+from stackbench.utils import validate_with_pydantic
+
 
 # ============================================================================
-# VALIDATION SCHEMAS
+# All validation now uses Pydantic models directly from stackbench.schemas
+# No need for manual schema dictionaries - they were source of duplication
 # ============================================================================
-
-DOCUMENT_ANALYSIS_SCHEMA = {
-    "required_fields": [
-        "page", "library", "language", "signatures", "examples",
-        "processed_at", "total_signatures", "total_examples", "warnings"
-    ],
-    "optional_fields": ["version", "processing_time_ms"],
-    "field_types": {
-        "page": str,
-        "library": str,
-        "version": (str, type(None)),
-        "language": str,
-        "signatures": list,
-        "examples": list,
-        "processed_at": str,
-        "total_signatures": int,
-        "total_examples": int,
-        "warnings": list,
-        "processing_time_ms": (int, type(None))
-    },
-    "nested_schemas": {
-        "signatures": {
-            "required_fields": ["library", "function", "params", "param_types", "defaults", "imports", "line", "context"],
-            "optional_fields": ["method_chain", "raw_code", "section_hierarchy", "markdown_anchor", "code_block_index"],
-            "field_types": {
-                "library": str,
-                "function": str,
-                "method_chain": (str, type(None)),
-                "params": list,
-                "param_types": dict,
-                "defaults": dict,
-                "imports": str,
-                "line": int,
-                "context": str,
-                "raw_code": (str, type(None)),
-                "section_hierarchy": list,
-                "markdown_anchor": (str, type(None)),
-                "code_block_index": int
-            }
-        },
-        "examples": {
-            "required_fields": ["library", "language", "code", "has_main", "is_executable", "line", "context", "dependencies"],
-            "optional_fields": ["imports", "section_hierarchy", "markdown_anchor", "code_block_index", "snippet_source"],
-            "field_types": {
-                "library": str,
-                "language": str,
-                "code": str,
-                "imports": (str, type(None)),
-                "has_main": bool,
-                "is_executable": bool,
-                "line": int,
-                "context": str,
-                "dependencies": list,
-                "section_hierarchy": list,
-                "markdown_anchor": (str, type(None)),
-                "code_block_index": int,
-                "snippet_source": (str, type(None))
-            }
-        }
-    }
-}
-
-API_SIGNATURE_VALIDATION_SCHEMA = {
-    "required_fields": [
-        "validation_id", "validated_at", "source_file", "document_page", "library", "version",
-        "language", "summary", "validations", "environment", "processing_time_ms", "warnings"
-    ],
-    "optional_fields": [],
-    "field_types": {
-        "validation_id": str,
-        "validated_at": str,
-        "source_file": str,
-        "document_page": str,
-        "library": str,
-        "version": str,
-        "language": str,
-        "summary": dict,
-        "validations": list,
-        "environment": dict,
-        "processing_time_ms": int,
-        "warnings": list
-    },
-    "nested_schemas": {
-        "summary": {
-            "required_fields": ["total_signatures", "valid", "invalid", "not_found", "error", "accuracy_score", "critical_issues", "warnings"],
-            "field_types": {
-                "total_signatures": int,
-                "valid": int,
-                "invalid": int,
-                "not_found": int,
-                "error": int,
-                "accuracy_score": float,
-                "critical_issues": int,
-                "warnings": int
-            }
-        },
-        "environment": {
-            "required_fields": ["library_installed", "version_installed", "version_requested", "version_match", "python_version"],
-            "optional_fields": ["installation_output"],
-            "field_types": {
-                "library_installed": str,
-                "version_installed": str,
-                "version_requested": str,
-                "version_match": bool,
-                "python_version": str,
-                "installation_output": (str, type(None))
-            }
-        },
-        "validations": {
-            "required_fields": ["signature_id", "function", "library", "status", "documented", "issues", "confidence"],
-            "optional_fields": ["method_chain", "actual"],
-            "field_types": {
-                "signature_id": str,
-                "function": str,
-                "method_chain": (str, type(None)),
-                "library": str,
-                "status": str,
-                "documented": dict,
-                "actual": (dict, type(None)),
-                "issues": list,
-                "confidence": float
-            }
-        }
-    }
-}
-
-CODE_EXAMPLE_VALIDATION_SCHEMA = {
-    "required_fields": [
-        "page", "library", "version", "language", "validation_timestamp",
-        "results", "total_examples", "successful", "failed", "skipped"
-    ],
-    "optional_fields": [],
-    "field_types": {
-        "page": str,
-        "library": str,
-        "version": str,
-        "language": str,
-        "validation_timestamp": str,
-        "results": list,
-        "total_examples": int,
-        "successful": int,
-        "failed": int,
-        "skipped": int
-    },
-    "nested_schemas": {
-        "results": {
-            "required_fields": ["example_index", "line", "context", "code", "status", "depends_on_previous"],
-            "optional_fields": ["error_message", "suggestions", "execution_output", "depends_on_example_indices", "actual_code_executed"],
-            "field_types": {
-                "example_index": int,
-                "line": int,
-                "context": str,
-                "code": str,
-                "status": str,
-                "error_message": (str, type(None)),
-                "suggestions": (str, type(None)),
-                "execution_output": (str, type(None)),
-                "depends_on_previous": bool,
-                "depends_on_example_indices": list,
-                "actual_code_executed": (str, type(None))
-            }
-        }
-    }
-}
-
-CLARITY_VALIDATION_SCHEMA = {
-    "required_fields": [
-        "validation_id", "validated_at", "source_file", "document_page",
-        "library", "version", "language", "clarity_score", "clarity_issues",
-        "structural_issues", "technical_accessibility", "summary",
-        "processing_time_ms", "warnings"
-    ],
-    "optional_fields": [],
-    "field_types": {
-        "validation_id": str,
-        "validated_at": str,
-        "source_file": str,
-        "document_page": str,
-        "library": str,
-        "version": str,
-        "language": str,
-        "clarity_score": dict,
-        "clarity_issues": list,
-        "structural_issues": list,
-        "technical_accessibility": dict,
-        "summary": dict,
-        "processing_time_ms": int,
-        "warnings": list
-    },
-    "nested_schemas": {
-        "clarity_score": {
-            "required_fields": [
-                "overall_score", "instruction_clarity", "logical_flow",
-                "completeness", "consistency", "prerequisite_coverage",
-                "evaluation_criteria"
-            ],
-            "optional_fields": ["scoring_rationale"],
-            "field_types": {
-                "overall_score": float,
-                "instruction_clarity": float,
-                "logical_flow": float,
-                "completeness": float,
-                "consistency": float,
-                "prerequisite_coverage": float,
-                "evaluation_criteria": dict,
-                "scoring_rationale": (str, type(None))
-            }
-        },
-        "clarity_issues": {
-            "required_fields": [
-                "type", "severity", "line", "section", "message"
-            ],
-            "optional_fields": [
-                "step_number", "suggested_fix", "affected_code", "context_quote"
-            ],
-            "field_types": {
-                "type": str,
-                "severity": str,
-                "line": int,
-                "section": str,
-                "step_number": (int, type(None)),
-                "message": str,
-                "suggested_fix": (str, type(None)),
-                "affected_code": (str, type(None)),
-                "context_quote": (str, type(None))
-            }
-        },
-        "structural_issues": {
-            "required_fields": ["type", "severity", "location", "message"],
-            "optional_fields": ["suggested_fix"],
-            "field_types": {
-                "type": str,
-                "severity": str,
-                "location": str,
-                "message": str,
-                "suggested_fix": (str, type(None))
-            }
-        },
-        "technical_accessibility": {
-            "required_fields": [
-                "broken_links", "missing_alt_text", "code_blocks_without_language",
-                "total_links_checked", "total_images_checked",
-                "total_code_blocks_checked", "all_validated"
-            ],
-            "field_types": {
-                "broken_links": list,
-                "missing_alt_text": list,
-                "code_blocks_without_language": list,
-                "total_links_checked": int,
-                "total_images_checked": int,
-                "total_code_blocks_checked": int,
-                "all_validated": bool
-            }
-        },
-        "summary": {
-            "required_fields": [
-                "total_clarity_issues", "critical_clarity_issues",
-                "warning_clarity_issues", "info_clarity_issues",
-                "total_structural_issues", "critical_structural_issues",
-                "total_technical_issues", "overall_quality_rating"
-            ],
-            "field_types": {
-                "total_clarity_issues": int,
-                "critical_clarity_issues": int,
-                "warning_clarity_issues": int,
-                "info_clarity_issues": int,
-                "total_structural_issues": int,
-                "critical_structural_issues": int,
-                "total_technical_issues": int,
-                "overall_quality_rating": str
-            }
-        }
-    }
-}
 
 
 # ============================================================================
@@ -471,7 +207,7 @@ def validate_extraction_json(
     log_dir: Optional[Path] = None
 ) -> tuple[bool, Optional[List[str]]]:
     """
-    Validate extraction JSON data directly (not via hook).
+    Validate extraction JSON data using Pydantic model.
 
     Args:
         data: The JSON data to validate
@@ -481,10 +217,8 @@ def validate_extraction_json(
     Returns:
         Tuple of (passed, errors) where passed is bool and errors is list of error messages
     """
-    # Validate structure
-    errors = validate_json_structure(data, DOCUMENT_ANALYSIS_SCHEMA)
-
-    passed = len(errors) == 0
+    # Validate using Pydantic model directly
+    passed, errors = validate_with_pydantic(data, DocumentAnalysis)
 
     # Log validation call
     if log_dir:
@@ -507,7 +241,7 @@ def validate_validation_output_json(
     validation_type: str = "validation_output"
 ) -> tuple[bool, Optional[List[str]]]:
     """
-    Validate API/code/clarity validation JSON data directly (not via hook).
+    Validate API/code/clarity validation JSON data using Pydantic models.
 
     Args:
         data: The JSON data to validate
@@ -518,21 +252,19 @@ def validate_validation_output_json(
     Returns:
         Tuple of (passed, errors) where passed is bool and errors is list of error messages
     """
-    # Select appropriate schema based on validation type
+    # Select appropriate Pydantic model based on validation type
     if validation_type == "api_signature_validation":
-        schema = API_SIGNATURE_VALIDATION_SCHEMA
+        model = APISignatureValidationOutput
     elif validation_type == "code_example_validation":
-        schema = CODE_EXAMPLE_VALIDATION_SCHEMA
+        model = DocumentValidationResult
     elif validation_type == "clarity_validation":
-        schema = CLARITY_VALIDATION_SCHEMA
+        model = ClarityValidationOutput
     else:
-        # Default to API schema for backward compatibility
-        schema = API_SIGNATURE_VALIDATION_SCHEMA
+        # Default to API model for backward compatibility
+        model = APISignatureValidationOutput
 
-    # Validate structure
-    errors = validate_json_structure(data, schema)
-
-    passed = len(errors) == 0
+    # Validate using Pydantic model directly
+    passed, errors = validate_with_pydantic(data, model)
 
     # Log validation call
     if log_dir:
@@ -625,14 +357,11 @@ def create_extraction_validation_hook(output_dir: Optional[Path] = None, log_dir
                     }
                 }
 
-            # Select schema
-            schema = DOCUMENT_ANALYSIS_SCHEMA
+            # Validate using Pydantic
+            passed, errors = validate_with_pydantic(data, DocumentAnalysis)
 
-            # Validate structure
-            errors = validate_json_structure(data, schema)
-
-            if errors:
-                error_msg = f"Schema validation failed: {'; '.join(errors[:3])}"
+            if not passed:
+                error_msg = f"Schema validation failed: {'; '.join(errors[:3]) if errors else 'Unknown error'}"
 
                 # Log validation failure
                 if log_dir:
@@ -750,21 +479,21 @@ def create_validation_output_hook(output_dir: Optional[Path] = None, log_dir: Op
                     }
                 }
 
-            # Select schema based on validation type
+            # Select Pydantic model based on validation type
             if validation_type == "clarity_validation":
-                schema = CLARITY_VALIDATION_SCHEMA
+                model = ClarityValidationOutput
             elif validation_type == "api_signature_validation":
-                schema = API_SIGNATURE_VALIDATION_SCHEMA
+                model = APISignatureValidationOutput
             elif validation_type == "code_example_validation":
-                schema = CODE_EXAMPLE_VALIDATION_SCHEMA
+                model = DocumentValidationResult
             else:
-                schema = API_SIGNATURE_VALIDATION_SCHEMA  # Default
+                model = APISignatureValidationOutput  # Default
 
-            # Validate structure
-            errors = validate_json_structure(data, schema)
+            # Validate using Pydantic
+            passed, errors = validate_with_pydantic(data, model)
 
-            if errors:
-                error_msg = f"Schema validation failed: {'; '.join(errors[:3])}"
+            if not passed:
+                error_msg = f"Schema validation failed: {'; '.join(errors[:3]) if errors else 'Unknown error'}"
 
                 # Log validation failure
                 if log_dir:
