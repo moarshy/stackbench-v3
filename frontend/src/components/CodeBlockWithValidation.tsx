@@ -35,14 +35,14 @@ export function CodeBlockWithValidation({
       data-example-index={validation.example_index}
     >
       {/* Status Header */}
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between mb-2 gap-2">
+        <div className="flex items-center gap-2 flex-wrap min-w-0">
           {validation.status === 'success' ? (
-            <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" />
+            <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400 flex-shrink-0" />
           ) : validation.status === 'failure' ? (
-            <XCircle className="h-5 w-5 text-red-600 dark:text-red-400" />
+            <XCircle className="h-5 w-5 text-red-600 dark:text-red-400 flex-shrink-0" />
           ) : (
-            <div className="h-5 w-5 rounded-full bg-gray-400" />
+            <div className="h-5 w-5 rounded-full bg-gray-400 flex-shrink-0" />
           )}
           <span className="font-semibold">
             {validation.status === 'success' ? 'CODE VALIDATED' :
@@ -50,12 +50,12 @@ export function CodeBlockWithValidation({
              'VALIDATION SKIPPED'}
           </span>
           {validation.depends_on_previous && (
-            <span className="text-xs text-muted-foreground">
+            <span className="text-xs text-muted-foreground whitespace-nowrap">
               (depends on example{validation.depends_on_example_indices && validation.depends_on_example_indices.length > 1 ? 's' : ''} above)
             </span>
           )}
         </div>
-        <span className="text-xs text-muted-foreground">
+        <span className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0">
           📍 Line {validation.line}
         </span>
       </div>
@@ -91,11 +91,21 @@ export function CodeBlockWithValidation({
 
         {/* Error Preview (if failed) */}
         {validation.status === 'failure' && validation.error_message && (
-          <div className="bg-red-100 dark:bg-red-900/30 border border-red-300 dark:border-red-700 rounded p-2 text-sm">
-            <div className="font-medium text-red-900 dark:text-red-300">⚠️ Error:</div>
-            <div className="text-red-800 dark:text-red-400 font-mono text-xs mt-1">
+          <div className="bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-800 rounded p-3 text-sm">
+            <div className="font-semibold text-red-900 dark:text-red-200 mb-1.5">⚠️ Error:</div>
+            <div className="text-red-950 dark:text-red-100 font-mono text-xs whitespace-pre-wrap break-words">
               {validation.error_message.split('\n').slice(0, 2).join('\n')}
               {validation.error_message.split('\n').length > 2 && '...'}
+            </div>
+          </div>
+        )}
+
+        {/* Suggestions Preview (if failed) */}
+        {validation.status === 'failure' && validation.suggestions && (
+          <div className="bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800 rounded p-3 text-sm">
+            <div className="font-semibold text-blue-900 dark:text-blue-200 mb-1.5">💡 Suggestions:</div>
+            <div className="text-blue-950 dark:text-blue-100 text-xs whitespace-pre-wrap break-words">
+              {validation.suggestions}
             </div>
           </div>
         )}
@@ -125,7 +135,7 @@ export function CodeBlockWithValidation({
             {validation.error_message && (
               <div>
                 <div className="text-xs font-medium mb-1">Full Error:</div>
-                <pre className="text-xs bg-muted p-2 rounded overflow-x-auto max-h-48">
+                <pre className="text-xs bg-muted p-2 rounded overflow-x-auto max-h-48 whitespace-pre-wrap break-words">
                   {validation.error_message}
                 </pre>
               </div>
@@ -135,17 +145,9 @@ export function CodeBlockWithValidation({
             {validation.execution_output && (
               <div>
                 <div className="text-xs font-medium mb-1">Output:</div>
-                <pre className="text-xs bg-muted p-2 rounded overflow-x-auto max-h-48">
+                <pre className="text-xs bg-muted p-2 rounded overflow-x-auto max-h-48 whitespace-pre-wrap break-words">
                   {validation.execution_output}
                 </pre>
-              </div>
-            )}
-
-            {/* Suggestions */}
-            {validation.suggestions && (
-              <div>
-                <div className="text-xs font-medium mb-1">💡 Suggestions:</div>
-                <div className="text-xs">{validation.suggestions}</div>
               </div>
             )}
 

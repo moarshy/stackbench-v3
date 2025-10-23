@@ -36,7 +36,7 @@ class APISignature(BaseModel):
     # Location metadata for better association
     section_hierarchy: List[str] = Field(default_factory=list, description="Hierarchical section path, e.g., ['Create & Query', 'From Polars DataFrame', 'Sync API']")
     markdown_anchor: Optional[str] = Field(None, description="Markdown heading anchor/ID, e.g., '#from-polars-dataframe'")
-    code_block_index: int = Field(0, description="Index of code block within the section (0, 1, 2...)")
+    code_block_index: int = Field(default=0, description="Index of code block within the section (0, 1, 2...)")
 
 
 class CodeExample(BaseModel):
@@ -54,7 +54,7 @@ class CodeExample(BaseModel):
     # Location metadata for better association
     section_hierarchy: List[str] = Field(default_factory=list, description="Hierarchical section path, e.g., ['Create & Query', 'From Polars DataFrame', 'Sync API']")
     markdown_anchor: Optional[str] = Field(None, description="Markdown heading anchor/ID, e.g., '#from-polars-dataframe'")
-    code_block_index: int = Field(0, description="Index of code block within the section (0, 1, 2...)")
+    code_block_index: int = Field(default=0, description="Index of code block within the section (0, 1, 2...)")
     snippet_source: Optional[SnippetSource] = Field(None, description="If from snippet include (--8<--), the source file and tags")
 
 
