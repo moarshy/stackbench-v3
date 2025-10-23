@@ -512,10 +512,13 @@ function App() {
                     onViewInValidationTab={(exampleIndex) => {
                       // Switch to code validation tab
                       setActiveTab('cc-code-ex');
-                      // Scroll to result after tab switch
+                      // Scroll to result after tab switch and highlight it
                       setTimeout(() => {
                         const element = document.querySelector(`[data-result-index="${exampleIndex}"]`);
                         element?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        // Highlight briefly
+                        element?.classList.add('ring-2', 'ring-primary', 'ring-offset-2');
+                        setTimeout(() => element?.classList.remove('ring-2', 'ring-primary', 'ring-offset-2'), 2000);
                       }, 100);
                     }}
                   />
@@ -975,6 +978,7 @@ function App() {
                           {ccCodeExValidation.results.map((result, idx) => (
                             <div
                               key={idx}
+                              data-result-index={result.example_index}
                               className={`p-3 rounded-md border ${
                                 result.status === 'success'
                                   ? 'bg-green-500/5 border-green-500/20'
