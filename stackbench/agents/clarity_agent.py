@@ -29,8 +29,14 @@ from stackbench.schemas import (
     TechnicalAccessibility,
     BrokenLink,
     MissingAltText,
-    CodeBlockIssue
+    CodeBlockIssue,
+    ImprovementRoadmap,
+    ScoreExplanation
 )
+
+# Import helper functions
+from stackbench.agents.clarity_helpers import get_content_metrics_from_validation
+from stackbench.hooks.logging import AgentLogger, create_logging_hooks
 
 console = Console()
 
@@ -88,7 +94,7 @@ class ClarityValidationSummary(BaseModel):
 
 CLARITY_SYSTEM_PROMPT = """You are an expert documentation quality analyst specializing in evaluating instructional clarity and structure.
 
-Your role is to evaluate documentation from the perspective of a new user trying to follow tutorials and guides. You assess:
+Your role is to evaluate documentation from the perspective of a new user trying to follow tutorials and guides. You identify specific issues across 5 dimensions:
 
 1. **Instructional Clarity**
    - Are instructions clear and actionable?
@@ -124,22 +130,14 @@ EVALUATION APPROACH:
 - Walk through the documentation as if you're a developer trying to use this library for the first time
 - At each step, ask: "Would I know what to do? Would I have all the information I need?"
 - Identify SPECIFIC issues with SPECIFIC locations (section, line number, step number)
-- Provide actionable suggestions, not just criticism
-
-SCORING RUBRIC (0.0-10.0):
-- **10.0**: Perfect clarity, could not be improved
-- **8.0-9.0**: Excellent, only minor polish needed
-- **6.0-7.0**: Good, some clear improvements needed
-- **4.0-5.0**: Acceptable, multiple issues to address
-- **2.0-3.0**: Poor, significant problems blocking understanding
-- **0.0-1.0**: Unusable, cannot be followed
+- Provide actionable suggestions for each issue
 
 SEVERITY LEVELS:
-- **critical**: Issue blocks user progress entirely (missing prerequisite, broken logical flow)
-- **warning**: Issue causes confusion but is workaroundable (terminology inconsistency, unclear wording)
-- **info**: Nice-to-have improvement (adding time estimates, difficulty indicators)
+- **critical**: Issue blocks user progress entirely (missing prerequisite, broken logical flow, step references undefined resource)
+- **warning**: Issue causes confusion but is workaroundable (terminology inconsistency, unclear wording, missing context)
+- **info**: Nice-to-have improvement (adding time estimates, difficulty indicators, better examples)
 
-Always be thorough, specific, and constructive. Your goal is to help documentation reach a 9+ clarity score."""
+IMPORTANT: Your job is to FIND and DESCRIBE issues, not to calculate scores. A separate scoring system will use your findings to calculate deterministic quality scores."""
 
 
 def create_clarity_validation_prompt(
@@ -260,9 +258,8 @@ This markdown may contain build-time directives that reference external files. T
 1. **Read through the entire document** as if you're a new user trying to follow it
 2. **Resolve any snippet references** using the Read tool if needed
 3. **Identify clarity issues** with specific locations (section, line, step number)
-4. **Score the documentation** on 5 dimensions (0.0-10.0 scale)
-5. **Check technical accessibility** (broken links, missing alt text, code blocks)
-6. **Provide actionable suggestions** for each issue
+4. **Check technical accessibility** (broken links, missing alt text, code blocks)
+5. **Provide actionable suggestions** for each issue
 
 **Document Content:**
 ```markdown
@@ -273,32 +270,16 @@ This markdown may contain build-time directives that reference external files. T
 - Report SPECIFIC locations: Include section name, line number, and step number (if applicable)
 - Be GRANULAR: Not just "unclear" but "Step 3 at line 45 in section 'Configuration' references config.yaml never created"
 - Provide ACTIONABLE suggestions: Tell exactly how to fix each issue
-- Use the RUBRIC: Score based on the 0-10 scale defined in your system prompt
 - Check ALL links: Use Read tool to verify internal links, check external URLs
 - Validate images: Check for missing alt text
 - Check code blocks: Ensure all have language specification (```python, not just ```)
 - Consider validation results: Correlate clarity issues with validation failures when relevant
+- Categorize each issue by dimension: instruction_clarity, logical_flow, completeness, consistency, or prerequisite_coverage
 
 **OUTPUT FORMAT - Respond with ONLY this JSON structure:**
 
 ```json
 {{
-  "clarity_score": {{
-    "overall_score": 7.5,
-    "instruction_clarity": 8.0,
-    "logical_flow": 6.0,
-    "completeness": 7.0,
-    "consistency": 8.5,
-    "prerequisite_coverage": 7.0,
-    "evaluation_criteria": {{
-      "instruction_clarity": "Measured by: clarity of commands, completeness of examples, explanation of outcomes",
-      "logical_flow": "Measured by: whether steps build on each other, absence of gaps, proper sequencing",
-      "completeness": "Measured by: all prerequisites mentioned, all details included, edge cases covered",
-      "consistency": "Measured by: terminology consistency, code style consistency, similar operations explained similarly",
-      "prerequisite_coverage": "Measured by: prerequisites listed upfront, version requirements specified, system requirements mentioned"
-    }},
-    "scoring_rationale": "Overall strong tutorial with clear instructions, but Step 3 references config.yaml not created earlier (breaks logical flow), and prerequisites are mentioned mid-tutorial instead of at top. Consistency is excellent."
-  }},
   "clarity_issues": [
     {{
       "type": "logical_gap",
@@ -367,7 +348,7 @@ This markdown may contain build-time directives that reference external files. T
 - Provide actionable suggested_fix for each issue
 - Actually check links if possible (use Read tool to verify internal links)
 - Count all links, images, and code blocks accurately
-- Overall quality rating: "excellent" (8+), "good" (6-7.9), "needs_improvement" (4-5.9), "poor" (<4)"""
+- Focus on finding issues - scoring will be done separately based on your findings"""
 
 
 # ============================================================================
@@ -535,6 +516,108 @@ class DocumentationClarityAgent:
             console.print(f"[dim]Pre-resolved {len(replacements)} snippet(s)[/dim]")
 
         return processed, warnings
+
+    async def call_mcp_tool(
+        self,
+        doc_stem: str,
+        tool_name: str,
+        arguments: Dict[str, Any]
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Call an MCP server tool via Claude Agent SDK with proper logging.
+
+        Args:
+            doc_stem: Document name (for logging)
+            tool_name: Name of the MCP tool
+            arguments: Tool arguments
+
+        Returns:
+            Parsed JSON response or None on error
+        """
+        try:
+            # Setup MCP-specific logging
+            mcp_log_dir = self.validation_log_dir / "clarity_logs" / doc_stem / "mcp"
+            mcp_log_dir.mkdir(parents=True, exist_ok=True)
+
+            mcp_logger = AgentLogger(
+                log_file=mcp_log_dir / "mcp_agent.log",
+                tools_log_file=mcp_log_dir / "mcp_tools.jsonl"
+            )
+            mcp_logging_hooks = create_logging_hooks(mcp_logger)
+
+            mcp_logger.log_message(f"=== MCP Tool Call: {tool_name} ===", level="INFO")
+            mcp_logger.log_message(f"Arguments: {json.dumps(arguments, indent=2)}", level="DEBUG")
+
+            # Create hooks dictionary
+            hooks = {
+                'PreToolUse': mcp_logging_hooks['PreToolUse'],
+                'PostToolUse': mcp_logging_hooks['PostToolUse']
+            }
+
+            # Configure MCP server
+            options = ClaudeAgentOptions(
+                system_prompt="You are a helpful assistant that calls MCP tools.",
+                permission_mode="bypassPermissions",
+                cwd=str(Path.cwd()),
+                hooks=hooks,
+                mcp_servers={
+                    "clarity-scoring": {
+                        "command": "python",
+                        "args": ["-m", "stackbench.mcp_servers.clarity_scoring_server"],
+                    }
+                }
+            )
+
+            async with ClaudeSDKClient(options=options) as client:
+                # Ask Claude to call the MCP tool and return ONLY the raw JSON
+                prompt = f"""Call the {tool_name} tool with these exact arguments:
+
+```json
+{json.dumps(arguments, indent=2)}
+```
+
+CRITICAL: Return ONLY the raw JSON output from the tool - no explanations, no formatting, no markdown. Just the pure JSON object that the tool returns."""
+
+                await client.query(prompt)
+
+                # Get response
+                response_text = ""
+                async for message in client.receive_response():
+                    if isinstance(message, AssistantMessage):
+                        for block in message.content:
+                            if isinstance(block, TextBlock):
+                                response_text += block.text
+
+                # The response might still be formatted - try to extract JSON more aggressively
+                # First try: look for JSON in code blocks
+                json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response_text, re.DOTALL)
+                if json_match:
+                    response_text = json_match.group(1)
+                else:
+                    # Second try: find the first { and last } and extract everything between
+                    start = response_text.find('{')
+                    end = response_text.rfind('}')
+                    if start != -1 and end != -1:
+                        response_text = response_text[start:end+1]
+
+                # Parse JSON
+                try:
+                    result = json.loads(response_text)
+                    mcp_logger.log_message(f"✓ Successfully parsed {tool_name} response", level="INFO")
+                    return result
+                except json.JSONDecodeError as e:
+                    mcp_logger.log_message(f"✗ Failed to parse JSON: {e}", level="ERROR")
+                    mcp_logger.log_message(f"Response: {response_text[:500]}", level="ERROR")
+                    console.print(f"[red]Failed to parse MCP response as JSON: {e}[/red]")
+                    console.print(f"[yellow]Response (first 500 chars):[/yellow]")
+                    console.print(response_text[:500])
+                    return None
+
+        except Exception as e:
+            console.print(f"[red]Error calling MCP tool {tool_name}: {e}[/red]")
+            import traceback
+            traceback.print_exc()
+            return None
 
     def extract_json_from_response(self, response_text: str) -> Optional[Dict[str, Any]]:
         """
@@ -729,52 +812,100 @@ class DocumentationClarityAgent:
                     console.print(f"[red]Failed to extract JSON from response for {document_page}[/red]")
                     return None
 
-                # Calculate processing time
-                processing_time = int((datetime.now() - start_time).total_seconds() * 1000)
+            # Now call MCP server for scoring (outside the Claude client context)
+            console.print(f"[dim]Calling MCP server for deterministic scoring...[/dim]")
 
-                # Combine snippet warnings with agent warnings
-                all_warnings = snippet_warnings + clarity_data.get('warnings', [])
+            # Load validation metrics
+            results_folder = self.output_folder.parent  # Go up from clarity_validation to results
+            metrics = get_content_metrics_from_validation(doc_stem, results_folder)
 
-                # Construct ClarityValidationOutput
-                analysis = ClarityValidationOutput(
-                    validation_id=str(uuid4()),
-                    validated_at=datetime.utcnow().isoformat() + 'Z',
-                    source_file=extraction_file.name,
-                    document_page=document_page,
-                    library=library,
-                    version=version,
-                    language=language,
-                    clarity_score=ClarityScore(**clarity_data.get('clarity_score', {})),
-                    clarity_issues=[ClarityIssue(**issue) for issue in clarity_data.get('clarity_issues', [])],
-                    structural_issues=[StructuralIssue(**issue) for issue in clarity_data.get('structural_issues', [])],
-                    technical_accessibility=TechnicalAccessibility(**clarity_data.get('technical_accessibility', {})),
-                    summary=clarity_data.get('summary', {}),
-                    processing_time_ms=processing_time,
-                    warnings=all_warnings
-                )
+            # Prepare issues for MCP server
+            issues = clarity_data.get('clarity_issues', [])
 
-                # Validate JSON before saving
-                from stackbench.hooks import validate_validation_output_json
+            # Call MCP server: calculate_clarity_score
+            score_result = await self.call_mcp_tool(doc_stem, "calculate_clarity_score", {
+                "issues": issues,
+                "metrics": metrics
+            })
 
-                analysis_dict = json.loads(analysis.model_dump_json())
-                filename = f"{extraction_file.stem.replace('_analysis', '')}_clarity.json"
+            if not score_result:
+                console.print(f"[red]Failed to calculate clarity score via MCP server[/red]")
+                return None
 
-                passed, errors = validate_validation_output_json(
-                    analysis_dict,
-                    filename,
-                    self.validation_log_dir,
-                    validation_type="clarity_validation"
-                )
+            clarity_score_data = score_result.get('clarity_score', {})
+            breakdown_data = score_result.get('breakdown', {})
 
-                if not passed:
-                    console.print(f"⚠️  {extraction_file.stem.replace('_analysis', '')} - Clarity validation failed: {errors[:2]}")
+            # Call MCP server: get_improvement_roadmap
+            roadmap_result = await self.call_mcp_tool(doc_stem, "get_improvement_roadmap", {
+                "issues": issues,
+                "metrics": metrics,
+                "current_score": clarity_score_data['overall_score']
+            })
 
-                # Save to file
-                output_file = self.output_folder / filename
-                with open(output_file, 'w', encoding='utf-8') as f:
-                    f.write(analysis.model_dump_json(indent=2))
+            if not roadmap_result:
+                console.print(f"[red]Failed to generate improvement roadmap[/red]")
+                return None
 
-                return analysis
+            # Call MCP server: explain_score
+            explanation_result = await self.call_mcp_tool(doc_stem, "explain_score", {
+                "score": clarity_score_data['overall_score'],
+                "breakdown": breakdown_data,
+                "issues": issues,
+                "metrics": metrics
+            })
+
+            if not explanation_result:
+                console.print(f"[red]Failed to generate score explanation[/red]")
+                return None
+
+            # Calculate processing time
+            processing_time = int((datetime.now() - start_time).total_seconds() * 1000)
+
+            # Combine snippet warnings with agent warnings
+            all_warnings = snippet_warnings + clarity_data.get('warnings', [])
+
+            # Construct ClarityValidationOutput with MCP results
+            analysis = ClarityValidationOutput(
+                validation_id=str(uuid4()),
+                validated_at=datetime.utcnow().isoformat() + 'Z',
+                source_file=extraction_file.name,
+                document_page=document_page,
+                library=library,
+                version=version,
+                language=language,
+                clarity_score=ClarityScore(**clarity_score_data),
+                clarity_issues=[ClarityIssue(**issue) for issue in issues],
+                structural_issues=[StructuralIssue(**issue) for issue in clarity_data.get('structural_issues', [])],
+                technical_accessibility=TechnicalAccessibility(**clarity_data.get('technical_accessibility', {})),
+                improvement_roadmap=ImprovementRoadmap(**roadmap_result),
+                score_explanation=ScoreExplanation(**explanation_result),
+                summary=clarity_data.get('summary', {}),
+                processing_time_ms=processing_time,
+                warnings=all_warnings
+            )
+
+            # Validate JSON before saving
+            from stackbench.hooks import validate_validation_output_json
+
+            analysis_dict = json.loads(analysis.model_dump_json())
+            filename = f"{extraction_file.stem.replace('_analysis', '')}_clarity.json"
+
+            passed, errors = validate_validation_output_json(
+                analysis_dict,
+                filename,
+                self.validation_log_dir,
+                validation_type="clarity_validation"
+            )
+
+            if not passed:
+                console.print(f"⚠️  {extraction_file.stem.replace('_analysis', '')} - Clarity validation failed: {errors[:2]}")
+
+            # Save to file
+            output_file = self.output_folder / filename
+            with open(output_file, 'w', encoding='utf-8') as f:
+                f.write(analysis.model_dump_json(indent=2))
+
+            return analysis
 
         except Exception as e:
             console.print(f"[red]Error analyzing {extraction_file.name}: {e}[/red]")
@@ -877,20 +1008,20 @@ class DocumentationClarityAgent:
         avg_score = total_score / len(successful_results)
 
         total_issues = sum(
-            r.summary.get('total_clarity_issues', 0) +
-            r.summary.get('total_structural_issues', 0) +
-            r.summary.get('total_technical_issues', 0)
+            r.summary.total_clarity_issues +
+            r.summary.total_structural_issues +
+            r.summary.total_technical_issues
             for r in successful_results
         )
 
         critical_issues = sum(
-            r.summary.get('critical_clarity_issues', 0) +
-            r.summary.get('critical_structural_issues', 0)
+            r.summary.critical_clarity_issues +
+            r.summary.critical_structural_issues
             for r in successful_results
         )
 
         warnings = sum(
-            r.summary.get('warning_clarity_issues', 0)
+            r.summary.warning_clarity_issues
             for r in successful_results
         )
 

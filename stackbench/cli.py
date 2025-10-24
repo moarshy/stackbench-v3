@@ -161,6 +161,85 @@ async def _run_pipeline(
 
 
 @app.command()
+def rerun_clarity(
+    run_id: str = typer.Argument(..., help="Run ID from data folder (e.g., 5bd8e375-313e-4328-827b-33889356828c)"),
+    num_workers: int = typer.Option(5, "--workers", "-w", help="Number of parallel workers"),
+):
+    """
+    Rerun only the clarity validation for an existing run.
+
+    This is useful after updating the clarity agent or MCP scoring server.
+    Requires that extraction, API validation, and code validation have already completed.
+    """
+    import json
+    from stackbench.agents.clarity_agent import DocumentationClarityAgent
+
+    console.print("\n[bold cyan]📊 Rerunning Clarity Validation[/bold cyan]\n")
+
+    # Locate run directory
+    data_dir = Path("data")
+    run_dir = data_dir / run_id
+
+    if not run_dir.exists():
+        console.print(f"[red]❌ Run directory not found: {run_dir}[/red]")
+        raise typer.Exit(1)
+
+    # Check required directories exist
+    extraction_dir = run_dir / "results" / "extraction"
+    results_dir = run_dir / "results"
+    repository_dir = run_dir / "repository"
+    output_dir = run_dir / "results" / "clarity_validation"
+    validation_log_dir = run_dir / "validation_logs"
+
+    if not extraction_dir.exists():
+        console.print(f"[red]❌ Extraction results not found: {extraction_dir}[/red]")
+        console.print("Run the full pipeline first with: stackbench run ...")
+        raise typer.Exit(1)
+
+    if not repository_dir.exists():
+        console.print(f"[red]❌ Repository not found: {repository_dir}[/red]")
+        raise typer.Exit(1)
+
+    # Create output directory
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    console.print(f"[bold]Run ID:[/bold] {run_id}")
+    console.print(f"[bold]Extraction:[/bold] {extraction_dir}")
+    console.print(f"[bold]Repository:[/bold] {repository_dir}")
+    console.print(f"[bold]Output:[/bold] {output_dir}")
+    console.print(f"[bold]Workers:[/bold] {num_workers}\n")
+
+    # Run clarity validation
+    try:
+        agent = DocumentationClarityAgent(
+            extraction_folder=extraction_dir,
+            output_folder=output_dir,
+            repository_folder=repository_dir,
+            num_workers=num_workers,
+            validation_log_dir=validation_log_dir
+        )
+
+        console.print("[bold]Running clarity validation with MCP scoring...[/bold]\n")
+
+        summary = asyncio.run(agent.analyze_all_documents())
+
+        console.print("\n[bold green]✓ Clarity validation complete![/bold green]")
+        console.print(f"\n[bold]📊 Results:[/bold]")
+        console.print(f"  • Documents analyzed: {summary['total_documents']}")
+        console.print(f"  • Average score: {summary['average_clarity_score']:.1f}/10")
+        console.print(f"  • Critical issues: {summary['critical_issues']}")
+        console.print(f"  • Warnings: {summary['warnings']}")
+        console.print(f"  • Duration: {summary['validation_duration_seconds']:.1f}s\n")
+        console.print(f"[bold]📁 Results saved to:[/bold] [cyan]{output_dir}[/cyan]\n")
+
+    except Exception as e:
+        console.print(f"\n[red]❌ Error: {e}[/red]")
+        import traceback
+        traceback.print_exc()
+        raise typer.Exit(1)
+
+
+@app.command()
 def version():
     """Show the version of stackbench."""
     console.print("[bold cyan]Stackbench[/bold cyan] v0.1.0")

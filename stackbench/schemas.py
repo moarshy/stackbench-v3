@@ -245,13 +245,12 @@ class StructuralIssue(BaseModel):
 class ClarityScore(BaseModel):
     """Clarity scoring metrics."""
     overall_score: float  # 0-10
+    tier: str  # S/A/B/C/D/F
     instruction_clarity: float
     logical_flow: float
     completeness: float
     consistency: float
     prerequisite_coverage: float
-    evaluation_criteria: Dict[str, str]
-    scoring_rationale: Optional[str] = None
 
 
 class BrokenLink(BaseModel):
@@ -297,6 +296,66 @@ class ClaritySummary(BaseModel):
     overall_quality_rating: str  # 'excellent' | 'good' | 'needs_improvement' | 'poor'
 
 
+class PrioritizedFix(BaseModel):
+    """A single improvement action from the roadmap."""
+    priority: str  # 'critical' | 'high' | 'medium' | 'low'
+    category: str
+    description: str
+    location: str
+    impact: str  # 'high' | 'medium' | 'low'
+    effort: str  # 'low' | 'medium' | 'high'
+    projected_score_change: float
+
+
+class ImprovementRoadmap(BaseModel):
+    """Prioritized list of improvements with projections."""
+    current_overall_score: float
+    projected_score_after_critical_fixes: float
+    projected_score_after_all_fixes: float
+    prioritized_fixes: List[PrioritizedFix]
+    quick_wins: List[PrioritizedFix]  # High impact + low effort
+
+
+class ScoreBreakdown(BaseModel):
+    """Detailed score calculation breakdown."""
+    base_score: float
+    critical_issues_penalty: float
+    warning_issues_penalty: float
+    info_issues_penalty: float
+    failed_examples_penalty: float
+    invalid_api_penalty: float
+    missing_api_penalty: float
+    final_score: float
+
+
+class TierRequirements(BaseModel):
+    """Requirements to reach next tier."""
+    current_tier: str
+    next_tier: Optional[str]
+    requirements_for_next_tier: Optional[Dict[str, Any]]
+    current_status: Dict[str, int]
+
+
+class PrimaryIssue(BaseModel):
+    """Summary of issues by category."""
+    category: str
+    critical: int
+    warning: int
+    info: int
+    example: str
+
+
+class ScoreExplanation(BaseModel):
+    """Human-readable score explanation."""
+    score: float
+    tier: str
+    tier_description: str
+    score_breakdown: ScoreBreakdown
+    tier_requirements: TierRequirements
+    primary_issues: List[PrimaryIssue]
+    summary: str
+
+
 class ClarityValidationOutput(BaseModel):
     """Complete clarity validation output."""
     validation_id: str
@@ -310,6 +369,8 @@ class ClarityValidationOutput(BaseModel):
     clarity_issues: List[ClarityIssue]
     structural_issues: List[StructuralIssue]
     technical_accessibility: TechnicalAccessibility
+    improvement_roadmap: ImprovementRoadmap
+    score_explanation: ScoreExplanation
     summary: ClaritySummary
     processing_time_ms: int
     warnings: List[str]

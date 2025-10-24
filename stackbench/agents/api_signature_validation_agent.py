@@ -41,12 +41,6 @@ from stackbench.schemas import (
 
 
 # ============================================================================
-# All Pydantic models are now imported from stackbench.schemas
-# This eliminates duplication and ensures consistency across all agents
-# ============================================================================
-
-
-# ============================================================================
 # PROMPT TEMPLATES
 # ============================================================================
 
