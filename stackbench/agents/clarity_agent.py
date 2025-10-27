@@ -8,6 +8,7 @@ It uses an LLM-as-judge approach to assess clarity, logical flow, completeness, 
 import json
 import re
 import asyncio
+import textwrap
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any
@@ -136,6 +137,13 @@ SEVERITY LEVELS:
 - **critical**: Issue blocks user progress entirely (missing prerequisite, broken logical flow, step references undefined resource)
 - **warning**: Issue causes confusion but is workaroundable (terminology inconsistency, unclear wording, missing context)
 - **info**: Nice-to-have improvement (adding time estimates, difficulty indicators, better examples)
+
+CODE BLOCK FORMATTING:
+- Code blocks may be extracted from test files or examples (dedented automatically during preprocessing)
+- Focus on LOGICAL clarity and correctness, not on indentation style preferences
+- Only flag indentation if it would cause a Python SyntaxError or IndentationError
+- Don't flag consistent indentation patterns as "inconsistent" - they may be intentional
+- Prioritize finding actual errors (undefined variables, missing imports, wrong APIs) over style issues
 
 IMPORTANT: Your job is to FIND and DESCRIBE issues, not to calculate scores. A separate scoring system will use your findings to calculate deterministic quality scores."""
 
@@ -502,6 +510,9 @@ class DocumentationClarityAgent:
                     snippet_code = source_content
 
                 if snippet_code:
+                    # Dedent to normalize indentation from source context
+                    # (snippets from test files may have function-level indentation)
+                    snippet_code = textwrap.dedent(snippet_code)
                     # Store replacement (match, snippet_code)
                     replacements.append((match, snippet_code))
 
@@ -513,7 +524,11 @@ class DocumentationClarityAgent:
             processed = processed[:match.start()] + snippet_code + processed[match.end():]
 
         if replacements:
-            console.print(f"[dim]Pre-resolved {len(replacements)} snippet(s)[/dim]")
+            console.print(f"[dim]Pre-resolved and dedented {len(replacements)} snippet(s)[/dim]")
+
+        if warnings:
+            for warning in warnings:
+                console.print(f"[yellow]Snippet warning: {warning}[/yellow]")
 
         return processed, warnings
 
