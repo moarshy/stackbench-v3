@@ -34,14 +34,21 @@ console = Console()
 def run(
     repo: str = typer.Option(..., "--repo", "-r", help="Git repository URL"),
     branch: str = typer.Option("main", "--branch", "-b", help="Git branch to clone"),
+    commit: Optional[str] = typer.Option(
+        None,
+        "--commit",
+        "-c",
+        help="Git commit hash (optional - if not provided, resolves from branch HEAD)",
+    ),
+    docs_path: str = typer.Option(..., "--docs-path", "-d", help="Base documentation directory (e.g., 'docs/src')"),
     include_folders: Optional[str] = typer.Option(
         None,
         "--include-folders",
         "-i",
-        help="Comma-separated list of folders to include (e.g., 'docs/src/python,docs/examples')",
+        help="Comma-separated list of folders relative to docs-path (e.g., 'python,javascript')",
     ),
     library: str = typer.Option(..., "--library", "-l", help="Primary library name (e.g., lancedb, fastapi)"),
-    version: str = typer.Option(..., "--version", "-v", help="Library version (e.g., 0.25.2)"),
+    version: str = typer.Option(..., "--version", "-v", help="Library version to test against (e.g., 0.25.2)"),
     output: Optional[str] = typer.Option(
         None,
         "--output",
@@ -54,12 +61,18 @@ def run(
         "-w",
         help="Number of parallel workers (default: 5)",
     ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        "-f",
+        help="Bypass cache and force re-analysis",
+    ),
 ):
     """
     Run complete documentation validation pipeline.
 
     This command will:
-    1. Clone the repository
+    1. Clone the repository (resolves commit hash if not provided)
     2. Extract API signatures and code examples from documentation
     3. Validate API signatures against the actual library
     4. Validate code examples by executing them
@@ -68,14 +81,23 @@ def run(
     Each worker processes one document end-to-end (extract → API → code → clarity).
     Documents are sorted longest-first to minimize idle worker time.
 
-    Example:
+    Example (latest commit):
         stackbench run \\
             --repo https://github.com/lancedb/lancedb \\
             --branch main \\
-            --include-folders docs/src/python \\
+            --docs-path docs/src \\
+            --include-folders python \\
             --library lancedb \\
-            --version 0.25.2 \\
-            --num-workers 5
+            --version 0.25.2
+
+    Example (specific commit):
+        stackbench run \\
+            --repo https://github.com/lancedb/lancedb \\
+            --commit fe25922 \\
+            --docs-path docs/src \\
+            --include-folders python,javascript \\
+            --library lancedb \\
+            --version 0.25.2
     """
 
     # Parse include_folders
@@ -87,10 +109,14 @@ def run(
     output_dir = Path(output).resolve() if output else Path("./data").resolve()
 
     # Display header
+    commit_display = f"Commit: [yellow]{commit}[/yellow]\n" if commit else ""
     console.print(Panel.fit(
         "[bold cyan]Stackbench Documentation Quality Validation[/bold cyan]\n\n"
         f"Repository: [yellow]{repo}[/yellow]\n"
         f"Branch: [yellow]{branch}[/yellow]\n"
+        f"{commit_display}"
+        f"Docs Path: [yellow]{docs_path}[/yellow]\n"
+        f"Include Folders: [yellow]{include_folders or 'all'}[/yellow]\n"
         f"Library: [yellow]{library}[/yellow] v[yellow]{version}[/yellow]\n"
         f"Output: [yellow]{output_dir}[/yellow]\n"
         f"Workers: [yellow]{num_workers}[/yellow]",
@@ -102,11 +128,14 @@ def run(
         asyncio.run(_run_pipeline(
             repo=repo,
             branch=branch,
+            commit=commit,
+            docs_path=docs_path,
             include_folders=include_folders_list,
             library=library,
             version=version,
             output_dir=output_dir,
             num_workers=num_workers,
+            force=force,
         ))
     except KeyboardInterrupt:
         console.print("\n[yellow]⚠️  Pipeline interrupted by user[/yellow]")
@@ -119,11 +148,14 @@ def run(
 async def _run_pipeline(
     repo: str,
     branch: str,
+    commit: Optional[str],
+    docs_path: str,
     include_folders: Optional[List[str]],
     library: str,
     version: str,
     output_dir: Path,
     num_workers: int,
+    force: bool,
 ):
     """Run the validation pipeline with worker pool."""
 
@@ -131,6 +163,8 @@ async def _run_pipeline(
     pipeline = DocumentationValidationPipeline(
         repo_url=repo,
         branch=branch,
+        commit=commit,
+        docs_path=docs_path,
         include_folders=include_folders,
         library_name=library,
         library_version=version,
@@ -139,7 +173,7 @@ async def _run_pipeline(
     )
 
     # Run worker pool pipeline
-    result = await pipeline.run()
+    result = await pipeline.run(force=force)
 
     # Display summary
     console.print("\n")

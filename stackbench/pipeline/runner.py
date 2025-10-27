@@ -18,6 +18,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskPr
 from rich.console import Console
 
 from stackbench.repository import RepositoryManager, RunContext
+from stackbench.cache import CacheManager
 from stackbench.agents import (
     DocumentationExtractionAgent,
     APISignatureValidationAgent,
@@ -39,6 +40,8 @@ class DocumentationValidationPipeline:
         library_name: str,
         library_version: str,
         base_output_dir: Path,
+        commit: Optional[str] = None,
+        docs_path: Optional[str] = None,
         include_folders: Optional[List[str]] = None,
         num_workers: int = 5,
     ):
@@ -51,11 +54,15 @@ class DocumentationValidationPipeline:
             library_name: Primary library being documented
             library_version: Library version to validate against
             base_output_dir: Base directory for all outputs
-            include_folders: Specific documentation folders to analyze
+            commit: Optional commit hash (if None, resolves from branch HEAD)
+            docs_path: Base documentation directory (e.g., 'docs/src')
+            include_folders: Folders relative to docs_path to analyze
             num_workers: Number of parallel workers for extraction (default: 5)
         """
         self.repo_url = repo_url
         self.branch = branch
+        self.commit = commit
+        self.docs_path = docs_path
         self.library_name = library_name
         self.library_version = library_version
         self.base_output_dir = Path(base_output_dir)
@@ -65,8 +72,9 @@ class DocumentationValidationPipeline:
         # Generate unique run ID
         self.run_id = str(uuid.uuid4())
 
-        # Initialize repository manager
+        # Initialize repository manager and cache manager
         self.repo_manager = RepositoryManager(base_data_dir=self.base_output_dir)
+        self.cache_manager = CacheManager(data_dir=self.base_output_dir)
 
         # Will be set during execution
         self.run_context: Optional[RunContext] = None
@@ -81,6 +89,8 @@ class DocumentationValidationPipeline:
         """
         print(f"\n🔄 Cloning repository: {self.repo_url}")
         print(f"   Branch: {self.branch}")
+        if self.commit:
+            print(f"   Commit: {self.commit}")
         print(f"   Run ID: {self.run_id}")
 
         self.run_context = self.repo_manager.clone_repository(
@@ -88,7 +98,10 @@ class DocumentationValidationPipeline:
             branch=self.branch,
             run_id=self.run_id,
             library_name=self.library_name,
-            library_version=self.library_version
+            library_version=self.library_version,
+            commit=self.commit,
+            docs_path=self.docs_path,
+            include_folders=self.include_folders
         )
 
         print(f"✅ Repository cloned to: {self.run_context.repo_dir}")
@@ -303,21 +316,76 @@ class DocumentationValidationPipeline:
 
         return worker_results
 
-    async def run(self) -> Dict[str, Any]:
+    async def run(self, force: bool = False) -> Dict[str, Any]:
         """
         Run the complete pipeline using worker pool pattern.
 
         Each worker processes documents end-to-end (extract → API → code → clarity).
         Documents are sorted longest-first to minimize idle time at end.
 
+        Args:
+            force: If True, bypass cache and re-run analysis
+
         Returns:
             Dict with all summaries
         """
         overall_start = datetime.now()
 
+        # 0. Check cache first (if not force)
+        if not force:
+            # Resolve commit hash first to check cache
+            resolved_commit = self.repo_manager.resolve_commit_hash(
+                self.repo_url, self.branch, self.commit
+            )
+
+            console.print(f"\n🔍 Checking cache for commit {resolved_commit}...")
+
+            cached_run_id = self.cache_manager.get_cached_run(
+                repo_url=self.repo_url,
+                doc_commit_hash=resolved_commit,
+                docs_path=self.docs_path,
+                library_name=self.library_name,
+                library_version=self.library_version
+            )
+
+            if cached_run_id:
+                console.print(f"\n✅ [bold green]Cache hit![/bold green] Using results from run: {cached_run_id}")
+                console.print(f"   Cached run directory: {self.base_output_dir / cached_run_id}")
+                console.print(f"   [dim]Use --force to bypass cache and re-run analysis[/dim]")
+
+                # Load cached results
+                cached_run_dir = self.base_output_dir / cached_run_id
+                return {
+                    "run_id": cached_run_id,
+                    "status": "cached",
+                    "cached": True,
+                    "cache_hit": True,
+                    "run_dir": str(cached_run_dir),
+                    "message": "Results loaded from cache"
+                }
+
+            console.print("   Cache miss - running new analysis")
+
+        else:
+            console.print("\n⚡ Force mode enabled - bypassing cache")
+
         # 1. Clone repository
         console.print("\n[cyan]🔄 Cloning repository...[/cyan]")
         await self.clone_repository()
+
+        # Add run to cache after cloning
+        if self.run_context and self.run_context.doc_commit_hash:
+            self.cache_manager.add_run(
+                run_id=self.run_id,
+                repo_url=self.repo_url,
+                branch=self.branch,
+                doc_commit_hash=self.run_context.doc_commit_hash,
+                docs_path=self.docs_path,
+                include_folders=self.include_folders or [],
+                library_name=self.library_name,
+                library_version=self.library_version,
+                status="in_progress"
+            )
 
         # 2. Find all markdown files
         md_files = self.repo_manager.find_markdown_files(
@@ -381,6 +449,9 @@ class DocumentationValidationPipeline:
         if self.run_context:
             self.run_context.mark_analysis_completed()
 
+            # Update cache status to completed
+            self.cache_manager.update_run_status(self.run_id, "completed")
+
         return {
             "run_id": self.run_id,
             "duration_seconds": overall_duration,
@@ -388,5 +459,7 @@ class DocumentationValidationPipeline:
             "total_documents": len(all_results),
             "successful": len([r for r in all_results if r['status'] == 'success']),
             "failed": len([r for r in all_results if r['status'] == 'failed']),
-            "results": all_results
+            "results": all_results,
+            "cached": False,
+            "cache_hit": False
         }

@@ -28,7 +28,7 @@ class APISignature(BaseModel):
     params: List[str] = Field(default_factory=list, description="Parameter names")
     param_types: Dict[str, str] = Field(default_factory=dict, description="Parameter types")
     defaults: Dict[str, Any] = Field(default_factory=dict, description="Default values")
-    imports: str = Field(description="Import statement needed")
+    imports: Optional[str] = Field(None, description="Import statement needed")
     line: int = Field(description="Approximate line number in document")
     context: str = Field(description="Section/heading this appears under")
     raw_code: Optional[str] = Field(None, description="Exact code snippet showing the signature")

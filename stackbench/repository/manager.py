@@ -21,7 +21,10 @@ class RunContext:
         analysis_type: str = "api_signature",
         library_name: Optional[str] = None,
         library_version: Optional[str] = None,
-        branch: Optional[str] = None
+        branch: Optional[str] = None,
+        doc_commit_hash: Optional[str] = None,
+        docs_path: Optional[str] = None,
+        include_folders: Optional[List[str]] = None
     ):
         self.run_id = run_id
         self.repo_url = repo_url
@@ -30,6 +33,9 @@ class RunContext:
         self.library_name = library_name
         self.library_version = library_version
         self.branch = branch
+        self.doc_commit_hash = doc_commit_hash
+        self.docs_path = docs_path
+        self.include_folders = include_folders or []
 
         # Directory structure
         self.run_dir = base_data_dir / run_id
@@ -79,6 +85,9 @@ class RunContext:
             "library_name": self.library_name,
             "library_version": self.library_version,
             "branch": self.branch,
+            "doc_commit_hash": self.doc_commit_hash,
+            "docs_path": self.docs_path,
+            "include_folders": self.include_folders,
             "created_at": self.created_at,
             "completed_at": self.completed_at,
             "status": self.status,
@@ -122,7 +131,10 @@ class RunContext:
             analysis_type=metadata.get("analysis_type", "api_signature"),
             library_name=metadata.get("library_name"),
             library_version=metadata.get("library_version"),
-            branch=metadata.get("branch")
+            branch=metadata.get("branch"),
+            doc_commit_hash=metadata.get("doc_commit_hash"),
+            docs_path=metadata.get("docs_path"),
+            include_folders=metadata.get("include_folders", [])
         )
         context.created_at = metadata["created_at"]
         context.completed_at = metadata.get("completed_at")
@@ -143,13 +155,64 @@ class RepositoryManager:
         self.base_data_dir = base_data_dir or Path.cwd() / "data"
         self.base_data_dir.mkdir(parents=True, exist_ok=True)
 
+    @staticmethod
+    def resolve_commit_hash(repo_url: str, branch: str, commit: Optional[str] = None) -> str:
+        """Resolve commit hash from branch HEAD if not provided.
+
+        Args:
+            repo_url: Git repository URL
+            branch: Git branch name
+            commit: Optional commit hash (if provided, returned as-is)
+
+        Returns:
+            Resolved commit hash (7-40 characters)
+
+        Raises:
+            RuntimeError: If commit resolution fails
+        """
+        # If commit provided, return it directly
+        if commit:
+            # Basic validation: commit should be alphanumeric (git commit hashes)
+            if not all(c in '0123456789abcdef' for c in commit.lower()):
+                raise RuntimeError(f"Invalid commit hash format: {commit}")
+            return commit
+
+        # Otherwise, resolve branch HEAD to commit hash
+        import tempfile
+        temp_dir = Path(tempfile.mkdtemp(prefix="stackbench_resolve_"))
+
+        try:
+            # Shallow clone (depth=1) to get latest commit only - faster
+            repo = git.Repo.clone_from(
+                repo_url,
+                temp_dir,
+                branch=branch,
+                depth=1
+            )
+
+            # Get HEAD commit hash (short form: 7 chars)
+            commit_hash = repo.head.commit.hexsha[:7]
+
+            return commit_hash
+
+        except Exception as e:
+            raise RuntimeError(f"Failed to resolve commit hash for {repo_url}@{branch}: {e}")
+
+        finally:
+            # Cleanup temporary directory
+            if temp_dir.exists():
+                shutil.rmtree(temp_dir)
+
     def clone_repository(
         self,
         repo_url: str,
         branch: str = "main",
         run_id: Optional[str] = None,
         library_name: Optional[str] = None,
-        library_version: Optional[str] = None
+        library_version: Optional[str] = None,
+        commit: Optional[str] = None,
+        docs_path: Optional[str] = None,
+        include_folders: Optional[List[str]] = None
     ) -> RunContext:
         """Clone repository and set up run directory structure.
 
@@ -159,10 +222,18 @@ class RepositoryManager:
             run_id: Optional run ID (if None, will be auto-generated)
             library_name: Optional library name for metadata
             library_version: Optional library version for metadata
+            commit: Optional commit hash (if None, will be resolved from branch HEAD)
+            docs_path: Optional base documentation path (e.g., 'docs/src')
+            include_folders: Optional list of folders relative to docs_path
 
         Returns:
             RunContext with cloned repository and directory structure
         """
+        # Resolve commit hash first (before cloning)
+        print(f"🔍 Resolving commit hash for {branch}...")
+        resolved_commit = self.resolve_commit_hash(repo_url, branch, commit)
+        print(f"✅ Resolved commit: {resolved_commit}")
+
         # Create run context with configuration
         if run_id:
             # Use provided run_id
@@ -172,7 +243,10 @@ class RepositoryManager:
                 base_data_dir=self.base_data_dir,
                 library_name=library_name,
                 library_version=library_version,
-                branch=branch
+                branch=branch,
+                doc_commit_hash=resolved_commit,
+                docs_path=docs_path,
+                include_folders=include_folders
             )
         else:
             # Generate run_id automatically
@@ -184,11 +258,19 @@ class RepositoryManager:
             context.library_name = library_name
             context.library_version = library_version
             context.branch = branch
+            context.doc_commit_hash = resolved_commit
+            context.docs_path = docs_path
+            context.include_folders = include_folders or []
         context.create_directories()
 
         try:
             # Clone repository with specific branch
-            git.Repo.clone_from(repo_url, context.repo_dir, branch=branch)
+            cloned_repo = git.Repo.clone_from(repo_url, context.repo_dir, branch=branch)
+
+            # If specific commit was provided, checkout that commit
+            if commit:
+                print(f"🔄 Checking out commit {commit}...")
+                cloned_repo.git.checkout(commit)
 
             # Clean up non-essential files to save space and focus on relevant content
             self.cleanup_for_signature_analysis(context.repo_dir)
@@ -286,12 +368,26 @@ class RepositoryManager:
 
         Args:
             context: Run context with repository path
-            include_folders: Specific folders to include (e.g., ['docs', 'docs/examples'])
+            include_folders: Specific folders to include, ALREADY COMBINED with docs_path
+                           (e.g., ['docs/src/python'] not just ['python'])
 
         Returns:
-            List of markdown file paths
+            List of markdown file paths (excluding API reference pages and other filtered content)
         """
         md_files = []
+        api_reference_pages = []  # Track filtered API reference pages for reporting
+
+        # Build full paths by combining docs_path with include_folders
+        # Note: The pipeline should pass already-combined paths
+        full_include_paths = []
+        if include_folders:
+            for folder in include_folders:
+                # If docs_path is in context and folder is relative, combine them
+                if context.docs_path and not folder.startswith(context.docs_path):
+                    full_path = f"{context.docs_path}/{folder}".replace('//', '/')
+                    full_include_paths.append(full_path)
+                else:
+                    full_include_paths.append(folder)
 
         for root, _, files in os.walk(context.repo_dir):
             # Prioritize documentation directories
@@ -303,17 +399,17 @@ class RepositoryManager:
                 continue
 
             # If include_folders is specified, only process those folders
-            if include_folders:
+            if full_include_paths:
                 # Check if current path is within any of the included folders
                 path_str = str(relative_root)
                 if path_str == ".":
                     # Root directory - check if any include_folders are at root level
-                    should_include = any(folder.count('/') == 0 for folder in include_folders)
+                    should_include = any(folder.count('/') == 0 for folder in full_include_paths)
                 else:
                     # Check if current path starts with any of the included folders
                     should_include = any(
                         path_str.startswith(folder) or path_str == folder
-                        for folder in include_folders
+                        for folder in full_include_paths
                     )
 
                 if not should_include:
@@ -323,9 +419,24 @@ class RepositoryManager:
                 if file.endswith(('.md', '.mdx')):
                     file_path = Path(root) / file
 
-                    # Filter out non-API documentation
-                    if not self._should_exclude_document(file_path):
-                        md_files.append(file_path)
+                    # Filter out common non-documentation files (changelog, etc.)
+                    if self._should_exclude_document(file_path):
+                        continue
+
+                    # Filter out auto-generated API reference pages
+                    if self._is_api_reference_page(file_path):
+                        api_reference_pages.append(file_path)
+                        continue
+
+                    # This is a valid documentation file to analyze
+                    md_files.append(file_path)
+
+        # Report filtered API reference pages
+        if api_reference_pages:
+            print(f"\n📋 Filtered out {len(api_reference_pages)} API reference page(s):")
+            for page in api_reference_pages:
+                rel_path = page.relative_to(context.repo_dir)
+                print(f"   - {rel_path}")
 
         return md_files
 
@@ -341,6 +452,57 @@ class RepositoryManager:
         ]
 
         return any(pattern in filename for pattern in exclude_patterns)
+
+    def _is_api_reference_page(self, file_path: Path) -> bool:
+        """
+        Detect if a markdown file is an auto-generated API reference page.
+
+        API reference pages use MkDocs Material ':::' directives to auto-generate
+        documentation from Python docstrings. These pages should be skipped because:
+        - They extract tons of signatures (including internal methods like __init__)
+        - They're auto-generated, not hand-written tutorials
+        - They don't contain instructional content to validate
+
+        Detection heuristics:
+        1. Title contains "API Reference"
+        2. Short file (<50 lines) with multiple ':::' directives (>= 3)
+        3. High ratio of ':::' directives to content
+
+        Args:
+            file_path: Path to markdown file
+
+        Returns:
+            True if this is an API reference page (should skip)
+        """
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            lines = content.split('\n')
+            line_count = len(lines)
+
+            # Count MkDocs Material API doc directives
+            directive_count = sum(1 for line in lines if line.strip().startswith(':::'))
+
+            # Heuristic 1: Title explicitly says "API Reference"
+            # Check first 300 chars (covers title and first paragraph)
+            if 'API Reference' in content[:300]:
+                return True
+
+            # Heuristic 2: Short file with multiple directives
+            # (typical pattern: navigation page that just lists classes)
+            if line_count < 50 and directive_count >= 3:
+                return True
+
+            # Heuristic 3: High directive density (>20% of lines are directives)
+            if line_count > 0 and (directive_count / line_count) > 0.2:
+                return True
+
+            return False
+
+        except Exception:
+            # If we can't read the file, don't exclude it
+            return False
 
     def load_run_context(self, run_id: str) -> RunContext:
         """Load existing run context by ID."""

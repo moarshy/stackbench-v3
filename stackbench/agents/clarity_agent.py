@@ -138,12 +138,20 @@ SEVERITY LEVELS:
 - **warning**: Issue causes confusion but is workaroundable (terminology inconsistency, unclear wording, missing context)
 - **info**: Nice-to-have improvement (adding time estimates, difficulty indicators, better examples)
 
-CODE BLOCK FORMATTING:
-- Code blocks may be extracted from test files or examples (dedented automatically during preprocessing)
-- Focus on LOGICAL clarity and correctness, not on indentation style preferences
-- Only flag indentation if it would cause a Python SyntaxError or IndentationError
-- Don't flag consistent indentation patterns as "inconsistent" - they may be intentional
-- Prioritize finding actual errors (undefined variables, missing imports, wrong APIs) over style issues
+CODE BLOCK FORMATTING - DO NOT FLAG RENDERING ARTIFACTS:
+- **IGNORE INDENTATION ENTIRELY**: Code blocks are extracted from test files and normalized. Indentation is a rendering artifact, not a documentation issue
+- **DO NOT** flag: "inconsistent indentation", "extra spaces", "wrong indentation", "should be at module level", etc.
+- **ONLY flag indentation** if it would cause actual Python SyntaxError or IndentationError when executed
+- **Focus on CONTENT**: undefined variables, missing imports, wrong APIs, logical errors
+- **Ignore formatting**: whitespace, blank lines, indentation style are all rendering artifacts from the build system
+
+VARIABLE SCOPE ANALYSIS:
+- Before flagging "undefined variable", check if it's defined ANYWHERE in the document (not just current section)
+- If variable is defined in an earlier section:
+  * Type: "cross_section_variable_reference"
+  * Severity: "info"
+  * Message: "Variable 'X' used here was defined in section 'Y' above. Consider adding a note for users who jump directly to this section."
+- Only use "undefined_variable" with "critical" severity if the variable is truly missing from the entire document
 
 IMPORTANT: Your job is to FIND and DESCRIBE issues, not to calculate scores. A separate scoring system will use your findings to calculate deterministic quality scores."""
 
@@ -299,6 +307,17 @@ This markdown may contain build-time directives that reference external files. T
       "suggested_fix": "Add Step 2b: Create config.yaml with example content showing required fields (host, port, database_name)",
       "affected_code": "config = lancedb.Config.from_file('config.yaml')",
       "context_quote": "Now load your configuration: config = lancedb.Config.from_file('config.yaml')"
+    }},
+    {{
+      "type": "cross_section_variable_reference",
+      "severity": "info",
+      "line": 133,
+      "section": "From Pydantic Models",
+      "step_number": 2,
+      "message": "Variable 'data' used here was defined in section 'From Polars DataFrame' above. Consider adding a note for users who jump directly to this section.",
+      "suggested_fix": "Add comment before line 133: '# Using the same data defined in the previous section' or redefine data for this section",
+      "affected_code": "df = pl.DataFrame(data)",
+      "context_quote": "table = db.create_table('pydantic_table', schema=Item)\ndf = pl.DataFrame(data)"
     }}
   ],
   "structural_issues": [
@@ -513,6 +532,14 @@ class DocumentationClarityAgent:
                     # Dedent to normalize indentation from source context
                     # (snippets from test files may have function-level indentation)
                     snippet_code = textwrap.dedent(snippet_code)
+
+                    # AGGRESSIVE NORMALIZATION: Strip ALL leading whitespace from each line
+                    # This ensures code from test functions appears as top-level code
+                    # (clarity agent should focus on content, not rendering artifacts)
+                    snippet_lines = snippet_code.split('\n')
+                    snippet_lines = [line.lstrip() if line.strip() else line for line in snippet_lines]
+                    snippet_code = '\n'.join(snippet_lines)
+
                     # Store replacement (match, snippet_code)
                     replacements.append((match, snippet_code))
 
