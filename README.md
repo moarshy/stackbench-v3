@@ -42,17 +42,81 @@ Each process uses Claude Code with intelligent hooks that validate outputs and l
 # Install dependencies
 uv sync
 
-# Run validation on a repository
+# Run validation on a repository (latest commit)
 uv run stackbench run \
   --repo https://github.com/lancedb/lancedb \
   --branch main \
-  --include-folders docs/src/python \
+  --docs-path docs/src \
+  --include-folders python \
   --library lancedb \
   --version 0.25.2 \
   --num-workers 5
 ```
 
-The `--num-workers` flag (default: 5) controls parallel processing during extraction - multiple documents are analyzed concurrently by Claude Code agents.
+**Key parameters:**
+- `--docs-path` **(required)** - Base documentation directory (e.g., `docs/src`)
+- `--include-folders` *(optional)* - Comma-separated folders relative to docs-path (e.g., `python,javascript`)
+- `--num-workers` *(default: 5)* - Number of parallel workers for concurrent document processing
+- `--commit` *(optional)* - Specific commit hash (if omitted, resolves from branch HEAD automatically)
+- `--force` *(optional)* - Bypass cache and force re-analysis
+
+### Version Tracking & Comparison
+
+Stackbench tracks **two independent versions**:
+1. **Documentation Version** - Which git commit of the docs are we analyzing?
+2. **Library Version** - Which version of the library should we test against?
+
+This enables powerful validation scenarios:
+
+```bash
+# Scenario 1: Test latest docs against LanceDB 0.25.2
+uv run stackbench run \
+  --repo https://github.com/lancedb/lancedb \
+  --branch main \
+  --docs-path docs/src \
+  --include-folders python \
+  --library lancedb \
+  --version 0.25.2
+
+# Scenario 2: Pin to specific commit for reproducibility
+uv run stackbench run \
+  --repo https://github.com/lancedb/lancedb \
+  --commit fe25922 \
+  --docs-path docs/src \
+  --include-folders python \
+  --library lancedb \
+  --version 0.25.2
+
+# Scenario 3: Test old docs against newer library (check breaking changes)
+uv run stackbench run \
+  --repo https://github.com/lancedb/lancedb \
+  --commit abc123 \  # Old docs from earlier release
+  --docs-path docs/src \
+  --include-folders python \
+  --library lancedb \
+  --version 0.25.2  # Test against 0.25.2
+
+# Scenario 4: Force re-analysis (bypass cache)
+uv run stackbench run \
+  --repo https://github.com/lancedb/lancedb \
+  --branch main \
+  --docs-path docs/src \
+  --include-folders python \
+  --library lancedb \
+  --version 0.25.2 \
+  --force
+```
+
+**Smart Caching:**
+- Identical runs (same repo + commit + docs-path + library + version) are cached
+- Second run completes instantly using cached results
+- Cache key: `{repo}:{commit}:{docs_path}:{library_name}:{library_version}`
+- Use `--force` to bypass cache and re-run analysis
+
+**Version Comparison** *(UI coming soon)*:
+- Track documentation quality over time
+- Compare v0.25.0 → v0.26.0 to see if quality improved
+- Identify new issues introduced or resolved
 
 ### Walkthrough Validation
 

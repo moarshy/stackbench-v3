@@ -94,6 +94,58 @@ Both the extraction and clarity validation phases process multiple documents con
 - Enables processing large documentation sets efficiently
 - Clarity validation processed 7 LanceDB docs in ~3 minutes with 5 workers
 
+### Versioning & Caching System
+
+Stackbench tracks **two independent versions** that work together:
+
+**1. Documentation Version (Git Commit Hash)**
+- Which commit of the *documentation repository* are we analyzing?
+- Specified via `--commit` (optional) or auto-resolved from `--branch` HEAD
+- Stored as `doc_commit_hash` in metadata
+- Example: Docs at commit `fe25922` from the LanceDB repo
+
+**2. Library Version**
+- Which version of the *actual library* should validation agents install and test against?
+- Specified via `--library lancedb --version 0.25.2`
+- Stored as `library_name` and `library_version` in metadata
+- Example: Install `lancedb==0.25.2` in Python environment for testing
+
+**Why This Matters:**
+
+These versions are independent, enabling powerful validation scenarios:
+
+```bash
+# Same docs, different library → Test docs against multiple library versions
+stackbench run --commit abc123 --docs-path docs/src --include-folders python --library lancedb --version 0.25.2
+stackbench run --commit abc123 --docs-path docs/src --include-folders python --library lancedb --version 0.26.0
+
+# Same library, different docs → Track doc quality improvements
+stackbench run --commit def456 --docs-path docs/src --include-folders python --library lancedb --version 0.25.2
+stackbench run --commit ghi789 --docs-path docs/src --include-folders python --library lancedb --version 0.25.2
+
+# Both different → Full version comparison
+stackbench run --commit abc123 --docs-path docs/src --include-folders python --library lancedb --version 0.25.2
+stackbench run --commit def456 --docs-path docs/src --include-folders python --library lancedb --version 0.25.2
+```
+
+**Smart Caching (JSON-based):**
+
+Cache key format:
+```
+{repo_url}:{doc_commit_hash}:{docs_path}:{library_name}:{library_version}
+```
+
+Behavior:
+- Before running: Check if exact match exists in `data/runs.json`
+- Cache hit: Return cached results instantly (no re-analysis)
+- Cache miss: Run full pipeline, register in cache
+- Force mode: `--force` flag bypasses cache
+
+Implementation:
+- `stackbench/cache/manager.py` - JSON-based cache operations
+- `data/runs.json` - Index of all completed runs
+- Metadata includes: run_id, timestamps, status, all version info
+
 ### Hook System
 
 Stackbench's innovation is its use of **programmatic Python hooks** via Claude Code:
@@ -576,19 +628,22 @@ stackbench-v3/
 │   │   ├── api_validation_agent.py
 │   │   ├── code_validation_agent.py
 │   │   └── clarity_agent.py
-│   ├── walkthroughs/    # Walkthrough validation system ✨ NEW
+│   ├── walkthroughs/    # Walkthrough validation system ✨
 │   │   ├── __init__.py
 │   │   ├── schemas.py                      # Walkthrough data models
 │   │   ├── walkthrough_generate_agent.py   # Generate walkthroughs from docs
 │   │   ├── walkthrough_audit_agent.py      # Execute walkthroughs
 │   │   ├── mcp_server.py                   # MCP server for step delivery
 │   │   └── README.md                       # Module documentation
+│   ├── cache/           # Caching system ✨ NEW
+│   │   ├── __init__.py
+│   │   └── manager.py               # JSON-based cache operations
 │   ├── hooks/           # Validation hooks, Logging hooks, Hook manager
 │   │   ├── validation.py            # All validation schemas (core + walkthrough)
 │   │   └── manager.py               # Routes all agents to hooks
 │   ├── pipeline/        # Pipeline orchestration
-│   │   └── runner.py                # Core pipeline (extraction → validation)
-│   ├── repository/      # Git repository management
+│   │   └── runner.py                # Core pipeline with caching integration
+│   ├── repository/      # Git repository management (commit resolution)
 │   ├── schemas/         # Pydantic models (core pipeline)
 │   └── cli.py           # CLI entry point (core + walkthrough commands)
 ├── frontend/            # React web interface
@@ -598,8 +653,10 @@ stackbench-v3/
 │   └── demo-nextjs-walkthrough.json        # Real example (10 steps)
 ├── tests/               # Test suite
 └── data/                # Output directory (gitignored)
+    ├── runs.json                            # Cache index ✨ NEW
     └── <run_id>/
         ├── repository/                      # Cloned git repo
+        ├── metadata.json                    # Enhanced with doc_commit_hash, docs_path
         ├── results/                         # Core pipeline results
         │   ├── extraction/
         │   ├── api_validation/
@@ -607,7 +664,7 @@ stackbench-v3/
         │   └── clarity_validation/
         ├── validation_logs/                 # Core pipeline logs
         │   └── clarity_logs/
-        └── walkthroughs/                    # Walkthrough outputs ✨ NEW
+        └── walkthroughs/                    # Walkthrough outputs ✨
             └── wt_<uuid>/
                 ├── wt_<uuid>.json           # Generated walkthrough
                 ├── wt_<uuid>_audit.json     # Audit results
