@@ -491,11 +491,31 @@ function App() {
                           ✅ {ccCodeExValidation.successful} passed
                         </span>
                       )}
-                      {ccCodeExValidation.failed > 0 && (
-                        <span className="text-red-600 dark:text-red-400 font-semibold flex items-center gap-1">
-                          ❌ {ccCodeExValidation.failed} failed
-                        </span>
-                      )}
+                      {(() => {
+                        const errorCount = ccCodeExValidation.results.filter(r => r.status === 'failure' && r.severity === 'error').length;
+                        const warningCount = ccCodeExValidation.results.filter(r => r.status === 'failure' && r.severity === 'warning').length;
+                        const infoCount = ccCodeExValidation.results.filter(r => r.status === 'failure' && r.severity === 'info').length;
+
+                        return (
+                          <>
+                            {errorCount > 0 && (
+                              <span className="text-red-600 dark:text-red-400 font-semibold flex items-center gap-1">
+                                ⚠️ {errorCount} error{errorCount > 1 ? 's' : ''}
+                              </span>
+                            )}
+                            {warningCount > 0 && (
+                              <span className="text-amber-600 dark:text-amber-400 font-semibold flex items-center gap-1">
+                                ⚡ {warningCount} warning{warningCount > 1 ? 's' : ''}
+                              </span>
+                            )}
+                            {infoCount > 0 && (
+                              <span className="text-blue-600 dark:text-blue-400 flex items-center gap-1">
+                                ℹ️ {infoCount} info
+                              </span>
+                            )}
+                          </>
+                        );
+                      })()}
                       {ccCodeExValidation.skipped > 0 && (
                         <span className="text-gray-600 dark:text-gray-400 flex items-center gap-1">
                           ⏭️ {ccCodeExValidation.skipped} skipped
@@ -961,14 +981,22 @@ function App() {
                     <div className="text-sm text-muted-foreground">Loading...</div>
                   ) : ccCodeExValidation ? (
                     <div className="space-y-4">
-                      <div className="grid grid-cols-3 gap-3">
+                      <div className="grid grid-cols-4 gap-3">
                         <div className="p-4 rounded-md bg-green-500/10 border border-green-500/20">
                           <div className="text-xs text-muted-foreground mb-1">Successful</div>
                           <div className="text-3xl font-bold text-green-600">{ccCodeExValidation.successful}</div>
                         </div>
                         <div className="p-4 rounded-md bg-red-500/10 border border-red-500/20">
-                          <div className="text-xs text-muted-foreground mb-1">Failed</div>
-                          <div className="text-3xl font-bold text-red-600">{ccCodeExValidation.failed}</div>
+                          <div className="text-xs text-muted-foreground mb-1">Doc Errors</div>
+                          <div className="text-3xl font-bold text-red-600">
+                            {ccCodeExValidation.results.filter(r => r.status === 'failure' && r.severity === 'error').length}
+                          </div>
+                        </div>
+                        <div className="p-4 rounded-md bg-amber-500/10 border border-amber-500/20">
+                          <div className="text-xs text-muted-foreground mb-1">Warnings</div>
+                          <div className="text-3xl font-bold text-amber-600">
+                            {ccCodeExValidation.results.filter(r => r.status === 'failure' && r.severity === 'warning').length}
+                          </div>
                         </div>
                         <div className="p-4 rounded-md bg-gray-500/10 border border-gray-500/20">
                           <div className="text-xs text-muted-foreground mb-1">Skipped</div>
@@ -989,38 +1017,67 @@ function App() {
                       <div>
                         <h4 className="text-sm font-semibold mb-3">Example Results</h4>
                         <div className="space-y-2">
-                          {ccCodeExValidation.results.map((result, idx) => (
-                            <div
-                              key={idx}
-                              data-result-index={result.example_index}
-                              className={`p-3 rounded-md border ${
-                                result.status === 'success'
-                                  ? 'bg-green-500/5 border-green-500/20'
-                                  : result.status === 'failure'
-                                    ? 'bg-red-500/5 border-red-500/20'
-                                    : 'bg-gray-500/5 border-gray-500/20'
-                              }`}
-                            >
-                              <div className="flex items-start justify-between mb-2">
-                                <div className="font-mono text-sm font-semibold">Example {result.example_index}</div>
-                                <span
-                                  className={`px-2 py-0.5 rounded text-xs font-medium ${
-                                    result.status === 'success'
-                                      ? 'bg-green-500/20 text-green-700'
-                                      : result.status === 'failure'
-                                        ? 'bg-red-500/20 text-red-700'
-                                        : 'bg-gray-500/20 text-gray-700'
-                                  }`}
-                                >
-                                  {result.status}
-                                </span>
-                              </div>
+                          {ccCodeExValidation.results.map((result, idx) => {
+                            // Determine colors based on severity for failures
+                            const getBgBorderClass = () => {
+                              if (result.status === 'success') return 'bg-green-500/5 border-green-500/20';
+                              if (result.status === 'skipped') return 'bg-gray-500/5 border-gray-500/20';
+                              if (result.severity === 'error') return 'bg-red-500/5 border-red-500/20';
+                              if (result.severity === 'warning') return 'bg-amber-500/5 border-amber-500/20';
+                              if (result.severity === 'info') return 'bg-blue-500/5 border-blue-500/20';
+                              return 'bg-red-500/5 border-red-500/20'; // default for failures
+                            };
+
+                            return (
+                              <div
+                                key={idx}
+                                data-result-index={result.example_index}
+                                className={`p-3 rounded-md border ${getBgBorderClass()}`}
+                              >
+                                <div className="flex items-start justify-between mb-2 gap-2">
+                                  <div className="font-mono text-sm font-semibold">Example {result.example_index}</div>
+                                  <div className="flex items-center gap-2 flex-shrink-0">
+                                    <span
+                                      className={`px-2 py-0.5 rounded text-xs font-medium ${
+                                        result.status === 'success'
+                                          ? 'bg-green-500/20 text-green-700'
+                                          : result.status === 'failure'
+                                            ? 'bg-red-500/20 text-red-700'
+                                            : 'bg-gray-500/20 text-gray-700'
+                                      }`}
+                                    >
+                                      {result.status}
+                                    </span>
+                                    {/* Severity Badge */}
+                                    {result.status === 'failure' && result.severity && (
+                                      <span className={`severity-badge severity-badge-${result.severity}`}>
+                                        {result.severity === 'error' && '⚠️'}
+                                        {result.severity === 'warning' && '⚡'}
+                                        {result.severity === 'info' && 'ℹ️'}
+                                        {result.severity}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
                               <div className="text-xs text-muted-foreground mb-2">
                                 Context: {result.context} (Line {result.line})
                               </div>
                               {result.error_message && (
-                                <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">
-                                  <div className="font-medium">Error:</div>
+                                <div className={`mt-2 p-2 rounded text-xs ${
+                                  result.severity === 'error'
+                                    ? 'bg-red-50 border border-red-200 text-red-700 dark:bg-red-950/50 dark:border-red-800 dark:text-red-100'
+                                    : result.severity === 'warning'
+                                    ? 'bg-amber-50 border border-amber-200 text-amber-700 dark:bg-amber-950/50 dark:border-amber-800 dark:text-amber-100'
+                                    : result.severity === 'info'
+                                    ? 'bg-blue-50 border border-blue-200 text-blue-700 dark:bg-blue-950/50 dark:border-blue-800 dark:text-blue-100'
+                                    : 'bg-red-50 border border-red-200 text-red-700 dark:bg-red-950/50 dark:border-red-800 dark:text-red-100'
+                                }`}>
+                                  <div className="font-medium">
+                                    {result.severity === 'error' && '⚠️ Documentation Error:'}
+                                    {result.severity === 'warning' && '⚡ Environment Issue:'}
+                                    {result.severity === 'info' && 'ℹ️ Info:'}
+                                    {!result.severity && 'Error:'}
+                                  </div>
                                   <div className="mt-1">{result.error_message}</div>
                                 </div>
                               )}

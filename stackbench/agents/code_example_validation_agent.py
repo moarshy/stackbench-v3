@@ -76,7 +76,32 @@ TASK:
    - **Track WHICH specific examples it depends on** (e.g., depends on examples [0, 2])
    - **Save the FULL CODE that was actually executed** (including merged dependencies)
    - Capture output, errors, and suggestions
+   - **Classify severity** if the example fails (see SEVERITY CLASSIFICATION below)
 4. Clean up the environment when done
+
+SEVERITY CLASSIFICATION (for failed examples only):
+Classify each failure by analyzing the error type and context:
+
+**"error"** - Clear documentation mistake that needs fixing:
+  * SyntaxError, IndentationError (malformed code in docs)
+  * NameError for undefined variables (not from dependencies)
+  * ImportError, ModuleNotFoundError (missing imports in docs)
+  * AttributeError on documented API calls (wrong method/attribute name)
+  * TypeError from wrong argument types in user code shown in docs
+  * Any error that occurs in the first few lines of user code
+
+**"warning"** - Likely environment/compatibility issue (not a doc error):
+  * Errors deep inside library internals (error in library's internal functions)
+  * Version compatibility errors (error message mentions version conflicts)
+  * TypeError in internal library functions (e.g., "_scan_pyarrow_dataset_impl")
+  * Dependency conflicts between libraries
+  * Errors that occur several stack frames deep into library code
+  * Errors with message suggesting updating library versions
+
+**"info"** - Non-blocking informational issues:
+  * DeprecationWarning, FutureWarning
+  * Output format differences (not errors, just different formatting)
+  * Performance warnings
 
 CRITICAL: Respond with ONLY the JSON array below. No explanatory text before or after. Just the JSON.
 
@@ -87,6 +112,7 @@ RESPONSE FORMAT - JSON ONLY:
   {{
     "example_index": 0,
     "status": "success|failure|skipped",
+    "severity": "error|warning|info",
     "error_message": "error details if failed",
     "suggestions": "how to fix or improve",
     "execution_output": "stdout/stderr output",
@@ -96,13 +122,14 @@ RESPONSE FORMAT - JSON ONLY:
   }},
   {{
     "example_index": 2,
-    "status": "success",
-    "error_message": null,
-    "suggestions": "Code depends on Example 0 for 'db' variable",
-    "execution_output": "Table created successfully",
+    "status": "failure",
+    "severity": "warning",
+    "error_message": "TypeError: _scan_pyarrow_dataset_impl() got multiple values for argument 'batch_size'",
+    "suggestions": "This is a compatibility issue between polars and lancedb. Try updating polars or use a workaround like .limit(1).collect() instead of .first().collect()",
+    "execution_output": "...",
     "depends_on_previous": true,
     "depends_on_example_indices": [0],
-    "actual_code_executed": "import lancedb\\ndb = lancedb.connect('data/sample-lancedb')\\nimport polars as pl\\ndata = pl.DataFrame(...)\\ntable = db.create_table('pl_table', data=data)"
+    "actual_code_executed": "import lancedb\\ndb = lancedb.connect('data/sample-lancedb')\\nldf = table.to_polars()\\nprint(ldf.first().collect())"
   }}
 ]
 ```
@@ -114,6 +141,10 @@ IMPORTANT:
 - For dependency tracking:
   - `depends_on_example_indices` must list specific example numbers (e.g., [0, 1] means depends on examples 0 and 1)
   - `actual_code_executed` must show the COMPLETE code that was run (if you merged multiple examples, include all of them)
+- For severity classification:
+  - `severity` is REQUIRED for all failures (status="failure")
+  - `severity` should be null for success/skipped
+  - Carefully analyze the error to distinguish doc errors from environment issues
 - Respond with ONLY the JSON array, no other text"""
 
 
@@ -388,6 +419,7 @@ class ValidationAgent:
                 context=example.get("context", ""),
                 code=example.get("code", ""),
                 status=val_result.get("status", "skipped"),
+                severity=val_result.get("severity"),  # NEW: Include severity
                 error_message=val_result.get("error_message"),
                 suggestions=val_result.get("suggestions"),
                 execution_output=val_result.get("execution_output"),
@@ -499,7 +531,21 @@ class ValidationAgent:
         total_failed = sum(r.failed for r in results)
         total_skipped = sum(r.skipped for r in results)
 
-        print(f"✅ Code validation complete: {total_successful} success, {total_failed} failed, {total_skipped} skipped ({validation_duration_seconds:.1f}s)")
+        # Calculate severity breakdown
+        total_errors = 0
+        total_warnings = 0
+        total_info = 0
+        for r in results:
+            for example_result in r.results:
+                if example_result.status == "failure" and example_result.severity:
+                    if example_result.severity == "error":
+                        total_errors += 1
+                    elif example_result.severity == "warning":
+                        total_warnings += 1
+                    elif example_result.severity == "info":
+                        total_info += 1
+
+        print(f"✅ Code validation complete: {total_successful} success, {total_failed} failed ({total_errors} errors, {total_warnings} warnings, {total_info} info), {total_skipped} skipped ({validation_duration_seconds:.1f}s)")
 
         # Save summary with timing
         summary = {
@@ -508,6 +554,11 @@ class ValidationAgent:
             "total_examples": total_examples,
             "successful": total_successful,
             "failed": total_failed,
+            "failed_by_severity": {
+                "error": total_errors,
+                "warning": total_warnings,
+                "info": total_info
+            },
             "validation_duration_seconds": round(validation_duration_seconds, 2),
             "num_workers": self.num_workers,
             "documents": [

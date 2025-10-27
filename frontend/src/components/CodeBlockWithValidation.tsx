@@ -19,15 +19,29 @@ export function CodeBlockWithValidation({
 }: CodeBlockWithValidationProps) {
   const [expanded, setExpanded] = useState(false);
 
-  const borderColor =
-    validation.status === 'success' ? 'border-green-500' :
-    validation.status === 'failure' ? 'border-red-500' :
-    'border-gray-400';
+  // Determine border color based on severity for failures, or status for success/skip
+  const getBorderColor = () => {
+    if (validation.status === 'success') return 'border-green-500';
+    if (validation.status === 'skipped') return 'border-gray-400';
+    // For failures, use severity if available
+    if (validation.severity === 'error') return 'border-red-500';
+    if (validation.severity === 'warning') return 'border-amber-500';
+    if (validation.severity === 'info') return 'border-blue-500';
+    return 'border-red-500'; // Default to red for failures without severity
+  };
 
-  const bgColor =
-    validation.status === 'success' ? 'bg-green-50/30 dark:bg-green-950/20' :
-    validation.status === 'failure' ? 'bg-red-50/30 dark:bg-red-950/20' :
-    'bg-gray-50/30 dark:bg-gray-950/20';
+  const getBgColor = () => {
+    if (validation.status === 'success') return 'bg-green-50/30 dark:bg-green-950/20';
+    if (validation.status === 'skipped') return 'bg-gray-50/30 dark:bg-gray-950/20';
+    // For failures, use severity if available
+    if (validation.severity === 'error') return 'bg-red-50/30 dark:bg-red-950/20';
+    if (validation.severity === 'warning') return 'bg-amber-50/30 dark:bg-amber-950/20';
+    if (validation.severity === 'info') return 'bg-blue-50/30 dark:bg-blue-950/20';
+    return 'bg-red-50/30 dark:bg-red-950/20'; // Default to red
+  };
+
+  const borderColor = getBorderColor();
+  const bgColor = getBgColor();
 
   return (
     <div
@@ -49,6 +63,16 @@ export function CodeBlockWithValidation({
              validation.status === 'failure' ? 'VALIDATION FAILED' :
              'VALIDATION SKIPPED'}
           </span>
+
+          {/* Severity Badge for Failures */}
+          {validation.status === 'failure' && validation.severity && (
+            <span className={`severity-badge severity-badge-${validation.severity}`}>
+              {validation.severity === 'error' && '⚠️ Doc Error'}
+              {validation.severity === 'warning' && '⚡ Environment Issue'}
+              {validation.severity === 'info' && 'ℹ️ Info'}
+            </span>
+          )}
+
           {validation.depends_on_previous && (
             <span className="text-xs text-muted-foreground whitespace-nowrap">
               (depends on example{validation.depends_on_example_indices && validation.depends_on_example_indices.length > 1 ? 's' : ''} above)
@@ -91,9 +115,38 @@ export function CodeBlockWithValidation({
 
         {/* Error Preview (if failed) */}
         {validation.status === 'failure' && validation.error_message && (
-          <div className="bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-800 rounded p-3 text-sm">
-            <div className="font-semibold text-red-900 dark:text-red-200 mb-1.5">⚠️ Error:</div>
-            <div className="text-red-950 dark:text-red-100 font-mono text-xs whitespace-pre-wrap break-words">
+          <div className={`rounded p-3 text-sm ${
+            validation.severity === 'error'
+              ? 'bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-800'
+              : validation.severity === 'warning'
+              ? 'bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800'
+              : validation.severity === 'info'
+              ? 'bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800'
+              : 'bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-800'
+          }`}>
+            <div className={`font-semibold mb-1.5 ${
+              validation.severity === 'error'
+                ? 'text-red-900 dark:text-red-200'
+                : validation.severity === 'warning'
+                ? 'text-amber-900 dark:text-amber-200'
+                : validation.severity === 'info'
+                ? 'text-blue-900 dark:text-blue-200'
+                : 'text-red-900 dark:text-red-200'
+            }`}>
+              {validation.severity === 'error' && '⚠️ Documentation Error:'}
+              {validation.severity === 'warning' && '⚡ Environment/Compatibility Issue:'}
+              {validation.severity === 'info' && 'ℹ️ Informational:'}
+              {!validation.severity && '⚠️ Error:'}
+            </div>
+            <div className={`font-mono text-xs whitespace-pre-wrap break-words ${
+              validation.severity === 'error'
+                ? 'text-red-950 dark:text-red-100'
+                : validation.severity === 'warning'
+                ? 'text-amber-950 dark:text-amber-100'
+                : validation.severity === 'info'
+                ? 'text-blue-950 dark:text-blue-100'
+                : 'text-red-950 dark:text-red-100'
+            }`}>
               {validation.error_message.split('\n').slice(0, 2).join('\n')}
               {validation.error_message.split('\n').length > 2 && '...'}
             </div>

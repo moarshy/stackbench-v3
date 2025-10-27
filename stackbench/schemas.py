@@ -105,6 +105,7 @@ class ExampleValidationResult(BaseModel):
     context: str
     code: str
     status: str = Field(description="success|failure|skipped")
+    severity: Optional[str] = Field(None, description="error|warning|info - Classification of issue severity. 'error' = clear doc mistake, 'warning' = environment/compatibility issue, 'info' = non-blocking (deprecations, etc). Only set when status is 'failure'")
     error_message: Optional[str] = None
     suggestions: Optional[str] = None
     execution_output: Optional[str] = None

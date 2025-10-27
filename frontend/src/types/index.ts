@@ -213,6 +213,7 @@ export interface CCExampleValidationResult {
   context: string;
   code: string;
   status: 'success' | 'failure' | 'skipped';
+  severity?: 'error' | 'warning' | 'info' | null; // NEW: Severity classification (only for failures)
   error_message: string | null;
   suggestions: string | null;
   execution_output: string | null;
