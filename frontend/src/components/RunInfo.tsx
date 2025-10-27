@@ -25,7 +25,7 @@ export function RunInfo({ runInfo }: RunInfoProps) {
     const Icon = config.icon;
 
     return (
-      <span className={`inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium border ${config.color}`}>
+      <span className={`run-info-status-badge ${config.color}`}>
         <Icon className="h-3 w-3" />
         {metadata.status}
       </span>
@@ -33,43 +33,43 @@ export function RunInfo({ runInfo }: RunInfoProps) {
   };
 
   return (
-    <div className="bg-card border border-border rounded-lg p-4">
-      <div className="flex items-start justify-between mb-3">
-        <h3 className="text-sm font-semibold">Current Run</h3>
+    <div className="run-info-card">
+      <div className="run-info-header">
+        <h3 className="run-info-title">Current Run</h3>
         {getStatusBadge()}
       </div>
 
-      <div className="space-y-2 text-sm">
-        <div className="flex items-start gap-2">
-          <GitBranch className="h-4 w-4 text-muted-foreground flex-shrink-0 mt-0.5" />
-          <div className="flex-1 min-w-0">
-            <div className="text-xs text-muted-foreground">Repository</div>
-            <div className="font-mono text-xs truncate">{metadata.repo_url}</div>
+      <div>
+        <div className="run-info-item">
+          <GitBranch className="run-info-icon" />
+          <div className="run-info-item-content">
+            <div className="run-info-item-label">Repository</div>
+            <div className="run-info-item-value run-info-item-value-mono">{metadata.repo_url}</div>
           </div>
         </div>
 
-        <div className="flex items-start gap-2">
-          <Package className="h-4 w-4 text-muted-foreground flex-shrink-0 mt-0.5" />
-          <div className="flex-1 min-w-0">
-            <div className="text-xs text-muted-foreground">Run ID</div>
-            <div className="font-mono text-xs truncate">{metadata.run_id}</div>
+        <div className="run-info-item">
+          <Package className="run-info-icon" />
+          <div className="run-info-item-content">
+            <div className="run-info-item-label">Run ID</div>
+            <div className="run-info-item-value run-info-item-value-mono">{metadata.run_id}</div>
           </div>
         </div>
 
-        <div className="flex items-start gap-2">
-          <Calendar className="h-4 w-4 text-muted-foreground flex-shrink-0 mt-0.5" />
-          <div className="flex-1">
-            <div className="text-xs text-muted-foreground">Created</div>
-            <div className="text-xs">{formatDate(metadata.created_at)}</div>
+        <div className="run-info-item">
+          <Calendar className="run-info-icon" />
+          <div className="run-info-item-content">
+            <div className="run-info-item-label">Created</div>
+            <div className="run-info-item-value">{formatDate(metadata.created_at)}</div>
           </div>
         </div>
 
         {metadata.completed_at && (
-          <div className="flex items-start gap-2">
-            <CheckCircle2 className="h-4 w-4 text-muted-foreground flex-shrink-0 mt-0.5" />
-            <div className="flex-1">
-              <div className="text-xs text-muted-foreground">Completed</div>
-              <div className="text-xs">{formatDate(metadata.completed_at)}</div>
+          <div className="run-info-item">
+            <CheckCircle2 className="run-info-icon" />
+            <div className="run-info-item-content">
+              <div className="run-info-item-label">Completed</div>
+              <div className="run-info-item-value">{formatDate(metadata.completed_at)}</div>
             </div>
           </div>
         )}

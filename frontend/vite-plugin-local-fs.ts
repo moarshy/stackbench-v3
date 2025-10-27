@@ -75,6 +75,28 @@ export function localFileSystemPlugin(): Plugin {
     name: 'local-fs-api',
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
+        // API endpoint to get configuration (base data directory path)
+        if (req.url === '/api/config') {
+          try {
+            // Resolve absolute path to data directory
+            // Since Vite runs from the frontend folder, we need to go up one level to get to project root
+            const frontendDir = process.cwd();
+            const projectRoot = path.resolve(frontendDir, '..');
+            const dataDir = path.resolve(projectRoot, 'data');
+
+            res.setHeader('Content-Type', 'application/json');
+            res.end(JSON.stringify({
+              baseDataDir: dataDir,
+              projectRoot: projectRoot,
+              frontendDir: frontendDir
+            }));
+          } catch (error) {
+            res.statusCode = 500;
+            res.end(JSON.stringify({ error: 'Failed to get config' }));
+          }
+          return;
+        }
+
         // API endpoint to list files in a directory
         if (req.url?.startsWith('/api/files?')) {
           const url = new URL(req.url, 'http://localhost');

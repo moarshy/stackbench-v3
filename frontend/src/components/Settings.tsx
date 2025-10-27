@@ -20,78 +20,89 @@ export function Settings({ onClose }: SettingsProps) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-card border border-border rounded-lg shadow-lg w-full max-w-2xl max-h-[80vh] overflow-auto">
-        <div className="flex items-center justify-between p-4 border-b border-border">
-          <h2 className="text-xl font-semibold flex items-center gap-2">
+    <div className="settings-modal-backdrop">
+      <div className="settings-modal-container">
+        {/* Header */}
+        <div className="settings-modal-header">
+          <h2 className="settings-modal-title">
             <SettingsIcon className="h-5 w-5" />
             Configuration
           </h2>
           <button
             onClick={onClose}
-            className="p-1 rounded-md hover:bg-accent hover:text-accent-foreground"
+            className="settings-modal-close-btn"
+            aria-label="Close settings"
           >
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="p-6 space-y-6">
-          <div className="p-4 bg-blue-50 border border-blue-200 rounded-md">
-            <div className="flex items-start gap-3">
-              <FolderOpen className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
-              <div className="text-sm text-blue-900">
-                <p className="font-medium mb-1">Data Directory Configuration</p>
-                <p className="text-xs text-blue-700">
+        {/* Content */}
+        <div className="settings-modal-content">
+          {/* Help Box */}
+          <div className="settings-help-box">
+            <div className="settings-help-box-content">
+              <FolderOpen className="h-5 w-5 settings-help-box-icon" />
+              <div className="settings-help-box-text">
+                <p className="settings-help-box-title">Data Directory Configuration</p>
+                <p className="settings-help-box-description">
                   The base data directory contains all stackbench validation runs. Each run is stored in a
-                  subdirectory with a unique ID. When you run <code className="px-1 py-0.5 bg-blue-100 rounded">stackbench run</code>,
+                  subdirectory with a unique ID. When you run <code className="settings-help-box-code">stackbench run</code>,
                   results are automatically saved here.
+                </p>
+                <p className="settings-help-box-description" style={{ marginTop: '0.75rem', fontWeight: 600 }}>
+                  ⚠️ Important: Use an <strong>absolute path</strong> (e.g., <code className="settings-help-box-code">/Users/username/project/data</code>).
+                  Relative paths won't work.
                 </p>
               </div>
             </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium mb-2 flex items-center gap-2">
-              <FolderOpen className="h-4 w-4" />
+          {/* Base Data Directory Input */}
+          <div className="settings-section">
+            <label className="settings-label">
+              <FolderOpen className="settings-label-icon" />
               Base Data Directory
             </label>
             <input
               type="text"
               value={baseDataDir}
               onChange={(e) => setBaseDataDir(e.target.value)}
-              className="w-full px-3 py-2 border border-input rounded-md bg-background text-sm font-mono"
-              placeholder="/path/to/stackbench-v3/data"
+              className="settings-input"
+              placeholder="/absolute/path/to/stackbench-v3/data"
             />
-            <p className="text-xs text-muted-foreground mt-1">
-              Directory where stackbench stores validation run results
+            <p className="settings-input-hint">
+              Must be an absolute path to where stackbench stores validation run results.
+              Example: <code className="settings-help-box-code">/Users/your-username/stackbench-v3/data</code>
             </p>
           </div>
 
-          <div className="pt-4 border-t border-border">
-            <h3 className="text-sm font-semibold mb-2">Expected Structure</h3>
-            <pre className="text-xs bg-muted p-3 rounded overflow-x-auto">
-{`data/
+          {/* Expected Structure */}
+          <div className="settings-divider">
+            <h3 className="settings-subsection-title">Expected Structure</h3>
+            <pre className="settings-code-block">{`data/
 └── {run-uuid}/
     ├── metadata.json
     ├── repository/
     └── results/
         ├── extraction/
         ├── api_validation/
-        └── code_validation/`}
-            </pre>
+        ├── code_validation/
+        └── clarity_validation/`}</pre>
           </div>
         </div>
 
-        <div className="flex items-center justify-end gap-3 p-4 border-t border-border">
+        {/* Footer */}
+        <div className="settings-modal-footer">
           <button
             onClick={onClose}
-            className="px-4 py-2 text-sm rounded-md hover:bg-accent hover:text-accent-foreground"
+            className="settings-btn settings-btn-cancel"
           >
             Cancel
           </button>
           <button
             onClick={handleSave}
-            className="px-4 py-2 text-sm rounded-md bg-primary text-primary-foreground hover:bg-primary/90"
+            className="settings-btn settings-btn-save"
           >
             Save & Reload
           </button>

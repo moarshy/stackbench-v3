@@ -9,7 +9,7 @@ import type {
   RunInfo as RunInfoType,
   WalkthroughData
 } from './types';
-import { apiService } from './services/api';
+import { apiService, configInitialized } from './services/api';
 import { Settings } from './components/Settings';
 import { MarkdownViewer } from './components/MarkdownViewer';
 import { Tabs, TabPanel } from './components/Tabs';
@@ -18,6 +18,7 @@ import { RunInfo } from './components/RunInfo';
 import { WalkthroughViewer } from './components/WalkthroughViewer';
 
 function App() {
+  const [configReady, setConfigReady] = useState(false);
   const [selectedRun, setSelectedRun] = useState<RunInfoType | null>(null);
   const [selectedDoc, setSelectedDoc] = useState<string | null>(null);
   const [docs, setDocs] = useState<string[]>([]);
@@ -38,6 +39,13 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [docPaneCollapsed, setDocPaneCollapsed] = useState(false);
   const [viewMode, setViewMode] = useState<'documents' | 'walkthroughs'>('documents');
+
+  // Wait for config to be initialized from backend
+  useEffect(() => {
+    configInitialized.then(() => {
+      setConfigReady(true);
+    });
+  }, []);
 
   // Parse URL parameters on mount
   useEffect(() => {
@@ -322,12 +330,18 @@ function App() {
               </div>
             </div>
             <div className="flex items-center gap-4">
-              {/* Run Selector */}
-              <RunSelector
-                selectedRun={selectedRun}
-                onRunSelect={setSelectedRun}
-                baseDataDir={apiService.getBaseDataDir()}
-              />
+              {/* Run Selector - wait for config to be ready */}
+              {configReady ? (
+                <RunSelector
+                  selectedRun={selectedRun}
+                  onRunSelect={setSelectedRun}
+                  baseDataDir={apiService.getBaseDataDir()}
+                />
+              ) : (
+                <div className="px-4 py-2 bg-muted rounded-md text-sm text-muted-foreground">
+                  Initializing...
+                </div>
+              )}
               {selectedDoc && (
                 <div className="flex items-center gap-2 text-sm px-3 py-1.5 bg-accent rounded-md">
                   <FileText className="h-4 w-4" />

@@ -361,10 +361,15 @@ export class APIService {
   }
 
   /**
-   * Update repository configuration
+   * Update repository configuration and persist to localStorage
    */
   updateConfig(newConfig: Partial<RepoConfig>) {
     this.config = { ...this.config, ...newConfig };
+
+    // Persist baseDataDir to localStorage
+    if (newConfig.baseDataDir) {
+      localStorage.setItem('stackbench_base_data_dir', newConfig.baseDataDir);
+    }
   }
 
   /**
@@ -382,10 +387,56 @@ export class APIService {
   }
 }
 
-// Default configuration - points to stackbench-v3 data directory
+/**
+ * Fetch base data directory from backend API
+ * The backend knows the absolute path to the project directory
+ */
+async function fetchBaseDataDirFromBackend(): Promise<string> {
+  try {
+    const response = await fetch('/api/config');
+    if (response.ok) {
+      const config = await response.json();
+      return config.baseDataDir;
+    }
+  } catch (error) {
+    console.error('Failed to fetch config from backend:', error);
+  }
+  return '';
+}
+
+/**
+ * Infer base data directory from localStorage or fetch from backend
+ *
+ * Note: The backend API requires absolute paths to access files.
+ * We fetch the path from the backend which knows where it's running from.
+ */
+function inferBaseDataDir(): string {
+  // Check localStorage first (user preference overrides)
+  const storedPath = localStorage.getItem('stackbench_base_data_dir');
+  if (storedPath) {
+    return storedPath;
+  }
+
+  // Try fetching from backend (will be set asynchronously)
+  // For now, return empty string and it will be updated when the app initializes
+  return '';
+}
+
+// Default configuration - will be updated after fetching from backend
 export const defaultConfig: RepoConfig = {
-  baseDataDir: '/Users/arshath/play/naptha/stackbench-v2/stackbench-v3/data',
+  baseDataDir: inferBaseDataDir(),
 };
 
 // Create default API service instance
 export const apiService = new APIService(defaultConfig);
+
+// Initialize config from backend on app startup
+// This Promise can be awaited by the app before rendering
+export const configInitialized = fetchBaseDataDirFromBackend().then(baseDataDir => {
+  if (baseDataDir && !localStorage.getItem('stackbench_base_data_dir')) {
+    // Update config with backend path if user hasn't set a custom path
+    apiService.updateConfig({ baseDataDir });
+    console.log('✅ Base data directory auto-detected:', baseDataDir);
+  }
+  return baseDataDir;
+});
