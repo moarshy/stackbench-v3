@@ -3,7 +3,7 @@
 import os
 import shutil
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 import json
 
@@ -52,6 +52,12 @@ class RunContext:
         self.api_validation_duration_seconds: Optional[float] = None
         self.code_validation_duration_seconds: Optional[float] = None
 
+        # Document discovery & filtering metrics
+        self.total_markdown_files: Optional[int] = None
+        self.markdown_in_include_folders: Optional[int] = None
+        self.filtered_api_reference_count: Optional[int] = None
+        self.validated_document_count: Optional[int] = None
+
     @classmethod
     def create(
         cls,
@@ -95,6 +101,10 @@ class RunContext:
             "extraction_duration_seconds": self.extraction_duration_seconds,
             "api_validation_duration_seconds": self.api_validation_duration_seconds,
             "code_validation_duration_seconds": self.code_validation_duration_seconds,
+            "total_markdown_files": self.total_markdown_files,
+            "markdown_in_include_folders": self.markdown_in_include_folders,
+            "filtered_api_reference_count": self.filtered_api_reference_count,
+            "validated_document_count": self.validated_document_count,
         }
 
         metadata_file = self.run_dir / "metadata.json"
@@ -143,6 +153,10 @@ class RunContext:
         context.extraction_duration_seconds = metadata.get("extraction_duration_seconds")
         context.api_validation_duration_seconds = metadata.get("api_validation_duration_seconds")
         context.code_validation_duration_seconds = metadata.get("code_validation_duration_seconds")
+        context.total_markdown_files = metadata.get("total_markdown_files")
+        context.markdown_in_include_folders = metadata.get("markdown_in_include_folders")
+        context.filtered_api_reference_count = metadata.get("filtered_api_reference_count")
+        context.validated_document_count = metadata.get("validated_document_count")
 
         return context
 
@@ -363,7 +377,7 @@ class RepositoryManager:
 
         return python_files
 
-    def find_markdown_files(self, context: RunContext, include_folders: Optional[List[str]] = None) -> List[Path]:
+    def find_markdown_files(self, context: RunContext, include_folders: Optional[List[str]] = None) -> Dict[str, Any]:
         """Find markdown files that likely contain API documentation.
 
         Args:
@@ -372,10 +386,17 @@ class RepositoryManager:
                            (e.g., ['docs/src/python'] not just ['python'])
 
         Returns:
-            List of markdown file paths (excluding API reference pages and other filtered content)
+            Dict with:
+                - files: List[Path] - Files to validate
+                - total_found: int - All .md/.mdx in repository
+                - in_include_folders: int - After path filtering, before API ref filtering
+                - filtered_api_reference: int - Count of API reference pages filtered
+                - api_reference_files: List[str] - Names of filtered API ref files
         """
         md_files = []
         api_reference_pages = []  # Track filtered API reference pages for reporting
+        total_markdown_count = 0  # All .md/.mdx files in repo
+        in_include_folders_count = 0  # After path filtering
 
         # Build full paths by combining docs_path with include_folders
         # Note: The pipeline should pass already-combined paths
@@ -398,26 +419,34 @@ class RepositoryManager:
             if '.git' in relative_root.parts:
                 continue
 
-            # If include_folders is specified, only process those folders
+            # Check if in include folders (for filtering)
+            in_include_folder = True
             if full_include_paths:
                 # Check if current path is within any of the included folders
                 path_str = str(relative_root)
                 if path_str == ".":
                     # Root directory - check if any include_folders are at root level
-                    should_include = any(folder.count('/') == 0 for folder in full_include_paths)
+                    in_include_folder = any(folder.count('/') == 0 for folder in full_include_paths)
                 else:
                     # Check if current path starts with any of the included folders
-                    should_include = any(
+                    in_include_folder = any(
                         path_str.startswith(folder) or path_str == folder
                         for folder in full_include_paths
                     )
 
-                if not should_include:
-                    continue
-
             for file in files:
                 if file.endswith(('.md', '.mdx')):
                     file_path = Path(root) / file
+
+                    # Count all markdown files in entire repository
+                    total_markdown_count += 1
+
+                    # Skip if not in include folders (path filtering)
+                    if full_include_paths and not in_include_folder:
+                        continue
+
+                    # Count files after path filtering (in include folders)
+                    in_include_folders_count += 1
 
                     # Filter out common non-documentation files (changelog, etc.)
                     if self._should_exclude_document(file_path):
@@ -438,7 +467,14 @@ class RepositoryManager:
                 rel_path = page.relative_to(context.repo_dir)
                 print(f"   - {rel_path}")
 
-        return md_files
+        # Return detailed metrics
+        return {
+            'files': md_files,
+            'total_found': total_markdown_count,
+            'in_include_folders': in_include_folders_count,
+            'filtered_api_reference': len(api_reference_pages),
+            'api_reference_files': [p.name for p in api_reference_pages]
+        }
 
     def _should_exclude_document(self, file_path: Path) -> bool:
         """Check if a document should be excluded from analysis."""

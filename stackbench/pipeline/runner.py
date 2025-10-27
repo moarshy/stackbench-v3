@@ -107,12 +107,27 @@ class DocumentationValidationPipeline:
         print(f"✅ Repository cloned to: {self.run_context.repo_dir}")
 
         # Find documentation files
-        md_files = self.repo_manager.find_markdown_files(
+        md_result = self.repo_manager.find_markdown_files(
             self.run_context,
             include_folders=self.include_folders
         )
+        md_files = md_result['files']
 
-        print(f"📄 Found {len(md_files)} documentation files")
+        # Store document discovery metrics in context
+        self.run_context.total_markdown_files = md_result['total_found']
+        self.run_context.markdown_in_include_folders = md_result['in_include_folders']
+        self.run_context.filtered_api_reference_count = md_result['filtered_api_reference']
+        self.run_context.validated_document_count = len(md_files)
+        self.run_context.save_metadata()
+
+        # Display document discovery stats
+        print(f"\n📄 Document Discovery:")
+        print(f"   Total .md/.mdx files in repo: {md_result['total_found']}")
+        if self.include_folders:
+            folders_display = ', '.join(self.include_folders)
+            print(f"   In include folders ({folders_display}): {md_result['in_include_folders']}")
+        print(f"   Filtered (API reference): {md_result['filtered_api_reference']}")
+        print(f"   Will validate: {len(md_files)}")
 
         # Set docs folder based on include_folders
         if self.include_folders and len(self.include_folders) == 1:
@@ -388,10 +403,11 @@ class DocumentationValidationPipeline:
             )
 
         # 2. Find all markdown files
-        md_files = self.repo_manager.find_markdown_files(
+        md_result = self.repo_manager.find_markdown_files(
             self.run_context,
             include_folders=self.include_folders
         )
+        md_files = md_result['files']
 
         if not md_files:
             console.print("[red]❌ No markdown files found[/red]")
