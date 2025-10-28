@@ -553,8 +553,13 @@ def get_tier(score):
 
 **Phase 2 (MCP Server)**: Calculate scores
 - Deterministic scoring algorithm
+- Calculates 5 dimension scores (0-10 each)
+- Overall score = average of dimensions
+- **Tier constraint**: Critical issues or failed examples automatically cap score at 7.9 (max Tier B)
 - Reproducible results
 - Impact/effort estimates for roadmap
+
+**Why tier constraints?** Critical issues (broken links, logical gaps that block users) and failed code examples represent fundamental documentation quality problems that should prevent "Excellent" (Tier A/S) ratings, even if other dimensions are perfect.
 
 ### 2. **Snippet Pre-processing (Level 2 - Fast Path)**
 

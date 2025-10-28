@@ -5,6 +5,11 @@ Clarity Scoring MCP Server
 Provides deterministic scoring and improvement roadmap generation for documentation clarity validation.
 Separates quantitative scoring (this server) from qualitative analysis (clarity agent).
 
+Scoring Algorithm:
+- Calculate 5 dimensional scores (each 0-10)
+- Overall score = average of dimension scores
+- TIER CONSTRAINT: Critical issues or failed examples automatically cap score at 7.9 (max Tier B)
+
 Tools:
 1. get_rubric - Returns scoring rubric and criteria
 2. calculate_clarity_score - Computes overall and dimensional scores
@@ -30,6 +35,7 @@ SCORING_RUBRIC = {
         "description": "Perfect - Production-ready documentation",
         "criteria": {
             "critical_issues": 0,
+            "failed_examples": 0,
             "max_warning_issues": 0,
             "max_info_issues": 2,
         },
@@ -39,8 +45,10 @@ SCORING_RUBRIC = {
         "description": "Excellent - Minor polish needed",
         "criteria": {
             "critical_issues": 0,
+            "failed_examples": 0,
             "max_warning_issues": 3,
         },
+        "constraint": "Score automatically capped at 7.9 if critical_issues > 0 or failed_examples > 0",
     },
     "6.0-7.9": {
         "tier": "B",
@@ -761,6 +769,15 @@ class ClarityScoringMCPServer:
                     # This ensures overall score is consistent with dimensional performance
                     overall_score = sum(dimension_scores.values()) / len(dimension_scores)
                     overall_score = max(0.0, min(10.0, overall_score))  # Clamp to 0-10 range
+
+                    # TIER CONSTRAINT: Critical issues prevent S/A tiers
+                    critical_count = sum(1 for i in issues if i.severity == "critical")
+                    failed_examples_count = metrics.failed_examples
+
+                    if critical_count > 0 or failed_examples_count > 0:
+                        # Cap at 7.9 (max Tier B) if there are critical issues or failed examples
+                        overall_score = min(overall_score, 7.9)
+
                     tier, _ = get_tier(overall_score)
 
                     # Still generate breakdown for transparency (shows what penalties were applied)
