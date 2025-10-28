@@ -3,17 +3,20 @@
 ## Objective
 
 The API Completeness Agent analyzes **documentation coverage** using a two-tier architecture:
-- **MCP Server (Deterministic)**: Library introspection, importance scoring, coverage calculations
-- **Agent (Qualitative)**: Reading extraction files, matching APIs to docs, orchestrating MCP calls
+- **Agent (Environment Interaction + Qualitative)**: Library installation, introspection execution via Bash, reading extraction files, matching APIs to docs
+- **MCP Server (Deterministic)**: Importance scoring, coverage classification, metrics calculations
 
 It:
-- Introspects the library to discover all public APIs (via MCP)
+- Installs the library in the agent's environment (via Bash)
+- Runs language-specific introspection templates (via Bash) to discover all public APIs
 - Aggregates documented APIs from all extraction results (agent)
 - Calculates tiered coverage and importance scores (via MCP)
 - Identifies undocumented APIs ranked by importance (via MCP)
-- Detects deprecated APIs still taught in documentation (via MCP)
+- Detects deprecated APIs still taught in documentation (via introspection + agent)
 
 This agent catches **missing documentation** and **deprecated API usage** - ensuring completeness and currency.
+
+**Key Architecture Decision**: Introspection runs in the agent's environment via Bash (not MCP subprocess) to avoid package isolation issues, while MCP handles only pure computational tasks.
 
 ## Position in Pipeline
 
@@ -45,21 +48,59 @@ This agent catches **missing documentation** and **deprecated API usage** - ensu
 
 ## Architecture: Agent + MCP Server
 
-### MCP Server Responsibilities (Deterministic)
-- **Library Introspection**: `pip install` + `inspect` module
-- **API Discovery**: Find all public functions, classes, methods
-- **Deprecation Detection**: Check decorators, docstrings, warnings
+### Agent Responsibilities (Environment Interaction + Qualitative)
+- **Library Installation**: `pip install` via Bash in agent's environment
+- **Introspection Execution**: Run language-specific templates via Bash
+  - Python: `stackbench/mcp_servers/introspection_templates/python_introspect.py`
+  - JavaScript/TypeScript: (Future: `js_introspect.js`, `ts_introspect.ts`)
+- **Read Introspection Results**: Parse standardized JSON output from templates
+- **Read Extraction Files**: Load all `*_analysis.json` files
+- **Pattern Matching**: Identify which APIs appear in docs
+- **Context Understanding**: Detect dedicated sections vs mentions
+- **MCP Orchestration**: Call MCP tools for scoring/classification
+- **Output Building**: Construct final JSON report
+
+### MCP Server Responsibilities (Deterministic Computation Only)
 - **Importance Scoring**: Heuristic-based ranking (0-10)
 - **Coverage Classification**: Tier assignment (0-3)
 - **Metrics Calculation**: Coverage percentages
 - **Prioritization**: Rank undocumented APIs
 
-### Agent Responsibilities (Qualitative)
-- **Read Extraction Files**: Load all `*_analysis.json` files
-- **Pattern Matching**: Identify which APIs appear in docs
-- **Context Understanding**: Detect dedicated sections vs mentions
-- **MCP Orchestration**: Call MCP tools in correct sequence
-- **Output Building**: Construct final JSON report
+### Introspection Templates (Language-Specific Scripts)
+Language-specific scripts that output standardized JSON format:
+
+**Location**: `stackbench/mcp_servers/introspection_templates/`
+
+**Python Template** (`python_introspect.py`):
+```bash
+python python_introspect.py <library> <version> [modules...] > output.json
+```
+
+Output format:
+```json
+{
+  "library": "lancedb",
+  "version": "0.25.2",
+  "language": "python",
+  "total_apis": 118,
+  "apis": [
+    {
+      "api": "lancedb.connect",
+      "module": "lancedb",
+      "type": "function",
+      "is_async": false,
+      "has_docstring": true,
+      "in_all": true,
+      "is_deprecated": false,
+      "signature": "(uri, *, api_key=None, ...)"
+    }
+  ],
+  "by_type": {"function": 5, "class": 11, "method": 102},
+  "deprecated_count": 3
+}
+```
+
+**Why Bash-based?** Avoids MCP subprocess isolation - templates run in agent's environment where packages are installed.
 
 ## Inputs
 

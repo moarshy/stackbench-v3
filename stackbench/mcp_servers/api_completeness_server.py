@@ -115,172 +115,6 @@ class CoverageMetrics(BaseModel):
 
 
 # ============================================================================
-# LIBRARY INTROSPECTION
-# ============================================================================
-
-def install_library(library_name: str, version: str, venv_path: Path) -> Tuple[bool, str]:
-    """
-    Install library in isolated virtual environment.
-
-    Args:
-        library_name: Name of library to install
-        version: Version to install
-        venv_path: Path to virtual environment
-
-    Returns:
-        Tuple of (success, message)
-    """
-    try:
-        # Create venv if doesn't exist
-        if not venv_path.exists():
-            subprocess.run(
-                [sys.executable, "-m", "venv", str(venv_path)],
-                check=True,
-                capture_output=True,
-                text=True
-            )
-
-        # Install library
-        pip_path = venv_path / "bin" / "pip"
-        result = subprocess.run(
-            [str(pip_path), "install", f"{library_name}=={version}"],
-            check=True,
-            capture_output=True,
-            text=True
-        )
-
-        return True, f"Installed {library_name}=={version}"
-    except subprocess.CalledProcessError as e:
-        return False, f"Installation failed: {e.stderr}"
-
-
-def introspect_module(module_name: str, parent_path: str = "") -> List[APIMetadata]:
-    """
-    Recursively introspect a module to find all public APIs.
-
-    Args:
-        module_name: Name of module to introspect
-        parent_path: Parent module path for nested modules
-
-    Returns:
-        List of APIMetadata objects
-    """
-    apis = []
-
-    try:
-        module = importlib.import_module(module_name)
-    except Exception as e:
-        logger.error(f"Failed to import {module_name}: {e}")
-        return apis
-
-    # Get __all__ if defined
-    all_names = getattr(module, '__all__', None)
-
-    # Iterate through module members
-    for name, obj in inspect.getmembers(module):
-        # Skip private members unless in __all__
-        if name.startswith('_') and (not all_names or name not in all_names):
-            continue
-
-        full_name = f"{parent_path}.{name}" if parent_path else name
-        in_all = all_names is not None and name in all_names
-
-        # Determine type and extract metadata
-        if inspect.isfunction(obj):
-            apis.append(APIMetadata(
-                api=full_name,
-                module=module_name,
-                type="function",
-                is_async=inspect.iscoroutinefunction(obj),
-                has_docstring=bool(obj.__doc__),
-                in_all=in_all,
-                is_deprecated=is_deprecated(obj)
-            ))
-
-        elif inspect.isclass(obj):
-            # Add class itself
-            apis.append(APIMetadata(
-                api=full_name,
-                module=module_name,
-                type="class",
-                has_docstring=bool(obj.__doc__),
-                in_all=in_all,
-                is_deprecated=is_deprecated(obj)
-            ))
-
-            # Add class methods
-            for method_name, method_obj in inspect.getmembers(obj, inspect.isfunction):
-                if not method_name.startswith('_') or method_name in ['__init__', '__call__']:
-                    method_full_name = f"{full_name}.{method_name}"
-                    apis.append(APIMetadata(
-                        api=method_full_name,
-                        module=module_name,
-                        type="method",
-                        is_async=inspect.iscoroutinefunction(method_obj),
-                        has_docstring=bool(method_obj.__doc__),
-                        in_all=False,  # Methods not in __all__
-                        is_deprecated=is_deprecated(method_obj)
-                    ))
-
-    return apis
-
-
-def is_deprecated(obj: Any) -> bool:
-    """
-    Check if an API is deprecated.
-
-    Args:
-        obj: Python object to check
-
-    Returns:
-        True if deprecated
-    """
-    # Check for @deprecated decorator
-    if hasattr(obj, '__deprecated__'):
-        return True
-
-    # Check docstring for deprecation warning
-    docstring = getattr(obj, '__doc__', '')
-    if docstring and any(word in docstring.lower() for word in ['deprecated', 'deprecation']):
-        return True
-
-    return False
-
-
-def extract_deprecation_info(obj: Any) -> Tuple[Optional[str], Optional[str]]:
-    """
-    Extract deprecation message and alternative from object.
-
-    Args:
-        obj: Python object
-
-    Returns:
-        Tuple of (message, alternative)
-    """
-    message = None
-    alternative = None
-
-    # Check __deprecated__ attribute
-    if hasattr(obj, '__deprecated__'):
-        message = getattr(obj, '__deprecated__', None)
-
-    # Parse docstring
-    docstring = getattr(obj, '__doc__', '')
-    if docstring:
-        lines = docstring.lower().split('\n')
-        for line in lines:
-            if 'deprecated' in line:
-                message = line.strip()
-                # Look for "use X instead"
-                if 'use' in line and 'instead' in line:
-                    parts = line.split('use')
-                    if len(parts) > 1:
-                        alternative = parts[1].split('instead')[0].strip()
-
-    return message, alternative
-
-
-# ============================================================================
 # IMPORTANCE SCORING
 # ============================================================================
 
@@ -484,23 +318,6 @@ class APICompletenessMCPServer:
             """List available tools."""
             return [
                 Tool(
-                    name="introspect_library",
-                    description=(
-                        "Discover all public APIs in a library via Python introspection. "
-                        "Installs the library and uses inspect module to find functions, "
-                        "classes, and methods. Returns metadata including deprecation status."
-                    ),
-                    inputSchema={
-                        "type": "object",
-                        "properties": {
-                            "library_name": {"type": "string", "description": "Library to introspect (e.g., 'lancedb')"},
-                            "version": {"type": "string", "description": "Version to install (e.g., '0.25.2')"},
-                            "modules": {"type": "array", "items": {"type": "string"}, "description": "Optional list of specific modules to introspect"}
-                        },
-                        "required": ["library_name", "version"]
-                    }
-                ),
-                Tool(
                     name="calculate_importance_score",
                     description=(
                         "Calculate importance score (0-10) for an API based on heuristics. "
@@ -596,9 +413,7 @@ class APICompletenessMCPServer:
         async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             """Handle tool calls."""
             try:
-                if name == "introspect_library":
-                    return await self._handle_introspect_library(arguments)
-                elif name == "calculate_importance_score":
+                if name == "calculate_importance_score":
                     return await self._handle_calculate_importance(arguments)
                 elif name == "classify_coverage":
                     return await self._handle_classify_coverage(arguments)
@@ -611,49 +426,6 @@ class APICompletenessMCPServer:
             except Exception as e:
                 logger.error(f"Error in {name}: {e}", exc_info=True)
                 return [TextContent(type="text", text=f"Error: {str(e)}")]
-
-    async def _handle_introspect_library(self, arguments: Dict) -> list[TextContent]:
-        """Handle introspect_library tool call."""
-        library_name = arguments["library_name"]
-        version = arguments["version"]
-        modules = arguments.get("modules", [library_name])
-
-        logger.info(f"Introspecting {library_name}=={version}")
-
-        # Create temporary venv
-        with tempfile.TemporaryDirectory() as tmpdir:
-            venv_path = Path(tmpdir) / "venv"
-
-            # Install library
-            success, message = install_library(library_name, version, venv_path)
-            if not success:
-                return [TextContent(type="text", text=json.dumps({"error": message}))]
-
-            # Add venv to path
-            python_path = venv_path / "bin" / "python"
-
-            # Introspect each module
-            all_apis = []
-            for module_name in modules:
-                apis = introspect_module(module_name)
-                all_apis.extend(apis)
-
-            # Convert to JSON
-            result = {
-                "library": library_name,
-                "version": version,
-                "total_apis": len(all_apis),
-                "apis": [api.model_dump() for api in all_apis],
-                "by_type": {
-                    "function": sum(1 for a in all_apis if a.type == "function"),
-                    "class": sum(1 for a in all_apis if a.type == "class"),
-                    "method": sum(1 for a in all_apis if a.type == "method")
-                },
-                "deprecated_count": sum(1 for a in all_apis if a.is_deprecated)
-            }
-
-            logger.info(f"Found {len(all_apis)} APIs in {library_name}")
-            return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     async def _handle_calculate_importance(self, arguments: Dict) -> list[TextContent]:
         """Handle calculate_importance_score tool call."""

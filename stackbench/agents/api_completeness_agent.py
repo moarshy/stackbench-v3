@@ -2,12 +2,13 @@
 API Completeness & Deprecation Agent - Analyzes documentation coverage and deprecated API usage.
 
 This agent uses Claude Code + MCP Server for deterministic analysis:
-- Agent (qualitative): Reads extraction files, understands doc structure
-- MCP Server (deterministic): Library introspection, importance scoring, coverage calculation
+- Agent (qualitative): Reads extraction files, understands doc structure, runs introspection via Bash
+- MCP Server (deterministic): Importance scoring, coverage classification, metrics calculation
 
 Architecture:
-- MCP Server handles: pip install, inspect module, importance heuristics
-- Agent handles: Reading extractions, matching APIs to docs, building output
+- Agent handles: Library installation, introspection (via Bash templates), reading extractions, matching APIs
+- MCP Server handles: Importance scoring heuristics, coverage tier classification, metrics calculation
+- Introspection templates: Language-specific scripts (Python, JS, TS) that output standardized JSON
 
 Key difference from other agents: Takes entire doc folder as input, not individual docs.
 """
@@ -50,27 +51,34 @@ from stackbench.schemas import (
 COMPLETENESS_SYSTEM_PROMPT = """You are an expert documentation completeness analyzer with access to deterministic API analysis tools.
 
 Your role is to assess documentation coverage by:
-1. Using MCP tools to discover library APIs (deterministic introspection)
+1. Installing library and running introspection via Bash
 2. Reading extraction files to understand what's documented
 3. Matching documented APIs to library APIs
-4. Building comprehensive completeness reports
+4. Using MCP tools for scoring and metrics
+5. Building comprehensive completeness reports
 
-**Available MCP Tools:**
-- `introspect_library(library, version)` - Returns all public APIs via inspect module
+**Introspection Templates:**
+- Located in `stackbench/introspection_templates/`
+- Language-specific scripts (python_introspect.py, js_introspect.js, ts_introspect.ts)
+- Output standardized JSON format (apis, by_type, deprecated_count)
+- Execute via Bash in your environment (not MCP subprocess)
+
+**Available MCP Tools (computation only):**
 - `calculate_importance_score(api_metadata)` - Scores API importance (0-10)
 - `classify_coverage(api, documented_in, ...)` - Classifies coverage tier (0-3)
 - `calculate_metrics(coverage_data)` - Computes coverage percentages
 - `prioritize_undocumented(apis, scores)` - Ranks undocumented APIs
 
 **Your Tasks:**
-1. Call MCP to introspect the library (get all APIs)
-2. Read extraction files from {extraction_folder}
-3. For each library API, determine if it's documented and how
-4. Call MCP to calculate importance scores
-5. Call MCP to classify coverage tiers
-6. Call MCP to calculate metrics
-7. Call MCP to prioritize gaps
-8. Build final JSON output
+1. Install library via pip (Bash command)
+2. Run introspection template via Bash, read JSON output
+3. Read extraction files from {extraction_folder}
+4. For each library API, determine if it's documented and how
+5. Call MCP to calculate importance scores
+6. Call MCP to classify coverage tiers
+7. Call MCP to calculate metrics
+8. Call MCP to prioritize gaps
+9. Build final JSON output
 
 **Coverage Tiers:**
 - Tier 0: Undocumented (not mentioned anywhere)
@@ -86,31 +94,77 @@ Your role is to assess documentation coverage by:
 - Common naming pattern: +1 point
 - Tiers: high (7-10), medium (4-6), low (0-3)
 
-You focus on understanding documentation structure. Let MCP handle deterministic calculations."""
+You focus on running introspection and understanding documentation structure. Let MCP handle deterministic calculations."""
 
 ANALYSIS_PROMPT = """Analyze documentation completeness for this library.
 
 Library: {library}
 Version: {version}
 Extraction Folder: {extraction_folder}
+Language: {language}
 
 **WORKFLOW:**
 
-STEP 1: Introspect Library (MCP)
-================================
-Call the `introspect_library` MCP tool to get all public APIs:
-- library_name: "{library}"
-- version: "{version}"
-- modules: ["{library}"]  # Add more if multi-module
+STEP 0: Install Library (Bash Command)
+=======================================
+Use Bash to install the library in your current environment:
 
-This returns:
+For Python:
+```bash
+pip install {library}=={version}
+```
+
+For JavaScript/TypeScript:
+```bash
+npm install {library}@{version}
+```
+
+Wait for successful installation before proceeding to STEP 1.
+
+STEP 1: Introspect Library (Bash + Introspection Template)
+===========================================================
+**For Python libraries:**
+
+1. Copy the Python introspection template to /tmp:
+   ```bash
+   cp stackbench/introspection_templates/python_introspect.py /tmp/introspect_{library}.py
+   ```
+
+2. Execute the template with your library:
+   ```bash
+   python /tmp/introspect_{library}.py {library} {version} > /tmp/introspection_result.json
+   ```
+
+3. Read the JSON output:
+   ```bash
+   cat /tmp/introspection_result.json
+   ```
+
+The output will be standardized JSON:
 {{
+  "library": "{library}",
+  "version": "{version}",
+  "language": "python",
+  "total_apis": 118,
   "apis": [
-    {{"api": "lancedb.connect", "module": "lancedb", "type": "function", ...}},
+    {{
+      "api": "lancedb.connect",
+      "module": "lancedb",
+      "type": "function",
+      "is_async": false,
+      "has_docstring": true,
+      "in_all": true,
+      "is_deprecated": false,
+      "signature": "(uri, *, api_key=None, ...)"
+    }},
     ...
   ],
-  "deprecated_count": N
+  "by_type": {{"function": 5, "class": 11, "method": 102}},
+  "deprecated_count": 3
 }}
+
+**For JavaScript/TypeScript libraries:**
+(Future: Use js_introspect.js or ts_introspect.ts templates)
 
 STEP 2: Read Extraction Files and BUILD RICH REFERENCES
 ========================================================
@@ -154,41 +208,79 @@ From these references, derive:
 - has_examples: any reference with context_type="example"
 - has_dedicated_section: check if section_hierarchy indicates dedicated API section
 
-STEP 3: Calculate Importance Scores (MCP)
-==========================================
-For each API from Step 1, call `calculate_importance_score` with:
-- api: API name
-- module: Module name
+STEP 3: Calculate Importance Scores (MCP Tool)
+===============================================
+For each API from Step 1, call the MCP `calculate_importance_score` tool with:
+- api: API name (e.g., "lancedb.connect")
+- module: Module name (e.g., "lancedb")
 - type: function/class/method
-- has_docstring: boolean
-- in_all: boolean
+- has_docstring: boolean (from introspection JSON)
+- in_all: boolean (from introspection JSON)
 
-Store importance scores for later.
+The MCP tool returns:
+{{
+  "api": "lancedb.connect",
+  "score": 9,
+  "tier": "high",
+  "reasons": ["In __all__", "Has documentation", "Public API", "Common API pattern: connect"],
+  "breakdown": {{"in_all": 3, "has_docstring": 2, "not_private": 1, "common_name": 1}}
+}}
 
-STEP 4: Classify Coverage (MCP)
-================================
-For each API, call `classify_coverage` with:
+Store importance scores for later steps.
+
+STEP 4: Classify Coverage (MCP Tool)
+=====================================
+For each API, call the MCP `classify_coverage` tool with:
 - api: API name
-- documented_in: List of pages mentioning it
-- appears_in_examples: boolean
-- has_dedicated_section: boolean
+- documented_in: List of pages mentioning it (from Step 2)
+- appears_in_examples: boolean (from Step 2)
+- has_dedicated_section: boolean (from Step 2)
 
-Store coverage tiers.
+The MCP tool returns:
+{{
+  "api": "lancedb.connect",
+  "tier": 3,
+  "documented_in": ["quickstart.md", "pandas_and_pyarrow.md"],
+  "has_examples": true,
+  "has_dedicated_section": true
+}}
 
-STEP 5: Calculate Metrics (MCP)
-================================
-Call `calculate_metrics` with all coverage tier data:
-- coverage_data: Array of {{"api": "...", "tier": N, ...}}
+Store coverage tiers for all APIs.
 
-This returns overall percentages.
+STEP 5: Calculate Metrics (MCP Tool)
+=====================================
+Call the MCP `calculate_metrics` tool with all coverage tier data:
+- coverage_data: Array of coverage tier objects from Step 4
 
-STEP 6: Prioritize Undocumented (MCP)
-======================================
-Filter APIs with tier 0, call `prioritize_undocumented` with:
-- undocumented_apis: List of undocumented API names
-- importance_scores: Map of scores from Step 3
+The MCP tool returns:
+{{
+  "total_apis": 118,
+  "documented": 89,
+  "with_examples": 75,
+  "with_dedicated_sections": 42,
+  "undocumented": 29,
+  "coverage_percentage": 75.4,
+  "example_coverage_percentage": 63.6,
+  "complete_coverage_percentage": 35.6
+}}
 
-This returns ranked list of what to document next.
+STEP 6: Prioritize Undocumented (MCP Tool)
+===========================================
+Filter APIs with tier 0, call the MCP `prioritize_undocumented` tool with:
+- undocumented_apis: List of undocumented API names (tier 0 from Step 4)
+- importance_scores: Map of API name to ImportanceScore from Step 3
+
+The MCP tool returns ranked list (sorted by importance score, descending):
+[
+  {{
+    "api": "lancedb.Database.drop_table",
+    "importance": "high",
+    "importance_score": 8,
+    "reasons": ["In __all__", "Has documentation", "Common CRUD operation"],
+    "rank": 1
+  }},
+  ...
+]
 
 STEP 7: Build Output JSON
 ==========================
@@ -265,9 +357,11 @@ Respond with ONLY this JSON structure (no explanatory text):
 ```
 
 IMPORTANT:
+- Install library and run introspection via Bash (not MCP)
 - Use MCP tools for ALL calculations (importance, coverage, metrics)
-- Your job: Read files, match patterns, orchestrate MCP calls
-- Be exhaustive in API discovery
+- Your job: Execute introspection, read files, match patterns, orchestrate MCP calls
+- Be exhaustive in API discovery - expect 100+ APIs for large libraries
+- Verify introspection output shows correct total_apis count before proceeding
 - Document any warnings/errors encountered
 """
 
@@ -466,6 +560,8 @@ class APICompletenessAgent:
         }
 
         # Create options with MCP server
+        import sys
+
         options = ClaudeAgentOptions(
             system_prompt=COMPLETENESS_SYSTEM_PROMPT,
             permission_mode="bypassPermissions",
@@ -473,7 +569,7 @@ class APICompletenessAgent:
             cwd=str(Path.cwd()),
             mcp_servers={
                 "api-completeness": {
-                    "command": "python",
+                    "command": sys.executable,  # Use same Python as current process
                     "args": ["-m", "stackbench.mcp_servers.api_completeness_server"],
                 }
             }
@@ -483,7 +579,8 @@ class APICompletenessAgent:
             prompt = ANALYSIS_PROMPT.format(
                 library=self.library_name,
                 version=self.library_version,
-                extraction_folder=str(self.extraction_folder)
+                extraction_folder=str(self.extraction_folder),
+                language=self.language
             )
 
             response_text = await self.get_claude_response(client, prompt, messages_log_file)
