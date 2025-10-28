@@ -142,6 +142,7 @@ Respond with a JSON object matching this exact schema:
       "imports": "from fastapi import FastAPI",
       "has_main": false,
       "is_executable": true,
+      "execution_context": "sync",
       "line": 67,
       "context": "Quick Start",
       "dependencies": ["fastapi"],
@@ -166,6 +167,39 @@ Critical requirements:
   - Count code blocks within each section (0 for first, 1 for second, etc.)
   - If code comes from a snippet include (--8<--), set snippet_source to {{"file": "path/to/file.py", "tags": ["tag1", "tag2"]}}, otherwise null
 - **IMPORTANT**: code_block_index MUST be an integer (use 0 if you cannot determine the index), NEVER null
+
+**EXECUTION CONTEXT DETECTION (for code examples)**:
+You MUST set `execution_context` based on the code's async patterns:
+
+1. **"async"** - Code contains async/await that needs async context:
+   - Has `await` keyword at top level (outside any function)
+   - Has `async def` function definitions
+   - Has `async with` or `async for` statements
+   - Examples:
+     * `async_db = await lancedb.connect_async(uri)` → "async"
+     * `result = await table.search(...)` → "async"
+     * `async def main(): ...` → "async"
+
+2. **"sync"** - Regular synchronous code that runs as-is:
+   - No async/await keywords
+   - Regular function definitions
+   - Standard Python code
+   - Examples:
+     * `db = lancedb.connect(uri)` → "sync"
+     * `df = pd.DataFrame(data)` → "sync"
+     * `table.search(vector).limit(10)` → "sync"
+
+3. **"not_executable"** - Incomplete snippets or pseudocode:
+   - Missing imports/context
+   - Contains ellipsis (...) or placeholders
+   - Partial code fragments
+   - Examples:
+     * `table.search(...)` → "not_executable"
+     * `# ... rest of code` → "not_executable"
+
+**IMPORTANT**: `is_executable` is DEPRECATED but still required for backwards compatibility:
+- If `execution_context` is "sync" → set `is_executable: true`
+- If `execution_context` is "async" or "not_executable" → set `is_executable: false`
 """
 
 

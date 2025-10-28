@@ -75,9 +75,43 @@ TASK:
    - If dependent: Execute with accumulated state from previous examples
    - **Track WHICH specific examples it depends on** (e.g., depends on examples [0, 2])
    - **Save the FULL CODE that was actually executed** (including merged dependencies)
+   - **Handle async code appropriately** (see ASYNC CODE HANDLING below)
    - Capture output, errors, and suggestions
    - **Classify severity** if the example fails (see SEVERITY CLASSIFICATION below)
 4. Clean up the environment when done
+
+ASYNC CODE HANDLING:
+Examples may have an "execution_context" field indicating if they need async handling:
+
+**"async"** - Code contains async/await patterns:
+  - Wrap the code in an async function and run with asyncio
+  - Template:
+    ```python
+    import asyncio
+
+    async def main():
+        # ... original code here ...
+
+    asyncio.run(main())
+    ```
+  - Example: If code is `async_db = await lancedb.connect_async(uri)`, execute as:
+    ```python
+    import asyncio
+    import lancedb
+
+    async def main():
+        uri = "data/sample-lancedb"
+        async_db = await lancedb.connect_async(uri)
+        return async_db
+
+    asyncio.run(main())
+    ```
+
+**"sync"** - Regular code:
+  - Execute as-is without any wrapping
+
+**"not_executable"** - Incomplete/pseudocode:
+  - Skip execution and mark as "skipped" with reason
 
 SEVERITY CLASSIFICATION (for failed examples only):
 Classify each failure by analyzing the error type and context:
@@ -186,7 +220,8 @@ class ValidationAgent:
                 "context": ex.get("context", ""),
                 "code": ex.get("code", ""),
                 "dependencies": ex.get("dependencies", []),
-                "is_executable": ex.get("is_executable", False)
+                "is_executable": ex.get("is_executable", False),
+                "execution_context": ex.get("execution_context", "sync")  # New field
             })
         return json.dumps(formatted, indent=2)
 

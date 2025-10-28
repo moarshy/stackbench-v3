@@ -233,14 +233,18 @@ def calculate_score(
     issues: List[ClarityIssue], metrics: ContentMetrics
 ) -> tuple[float, ScoreBreakdown]:
     """
-    Calculate overall clarity score based on issues and content metrics.
+    Calculate penalty-based score and breakdown (for transparency/debugging).
+
+    NOTE: This function is now primarily used to generate the ScoreBreakdown
+    for transparency. The actual overall_score is calculated by averaging
+    dimension scores in the tool handler.
 
     Args:
         issues: List of issues detected by clarity agent
         metrics: Content quality metrics from validation agents
 
     Returns:
-        Tuple of (final_score, breakdown)
+        Tuple of (penalty_based_score, breakdown)
     """
     # Count issues by severity
     critical_count = sum(1 for i in issues if i.severity == "critical")
@@ -739,11 +743,7 @@ class ClarityScoringMCPServer:
                     issues = [ClarityIssue(**issue) for issue in issues_data]
                     metrics = ContentMetrics(**metrics_data)
 
-                    # Calculate overall score
-                    overall_score, breakdown = calculate_score(issues, metrics)
-                    tier, _ = get_tier(overall_score)
-
-                    # Calculate dimensional scores
+                    # Calculate dimensional scores FIRST
                     dimensions = [
                         "instruction_clarity",
                         "logical_flow",
@@ -756,6 +756,17 @@ class ClarityScoringMCPServer:
                     for dim in dimensions:
                         dim_score = calculate_dimension_score(dim, issues, metrics)
                         dimension_scores[dim] = dim_score.score
+
+                    # Calculate overall score as AVERAGE of dimension scores
+                    # This ensures overall score is consistent with dimensional performance
+                    overall_score = sum(dimension_scores.values()) / len(dimension_scores)
+                    overall_score = max(0.0, min(10.0, overall_score))  # Clamp to 0-10 range
+                    tier, _ = get_tier(overall_score)
+
+                    # Still generate breakdown for transparency (shows what penalties were applied)
+                    _, breakdown = calculate_score(issues, metrics)
+                    # Update breakdown's final_score to reflect the new calculation
+                    breakdown.final_score = overall_score
 
                     result = ClarityScore(
                         overall_score=overall_score,

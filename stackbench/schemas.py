@@ -46,7 +46,16 @@ class CodeExample(BaseModel):
     code: str = Field(description="Complete code example")
     imports: Optional[str] = Field(None, description="All import statements")
     has_main: bool = Field(description="Whether example has a main/entry point")
-    is_executable: bool = Field(description="Whether example can run standalone")
+    is_executable: bool = Field(description="Whether example can run standalone (DEPRECATED - use execution_context)")
+    execution_context: str = Field(
+        default="sync",
+        description=(
+            "Execution context required for this code: "
+            "'sync' = runs as-is in normal Python context, "
+            "'async' = contains async/await and needs async context, "
+            "'not_executable' = incomplete snippet or pseudocode"
+        )
+    )
     line: int = Field(description="Approximate line number in document")
     context: str = Field(description="Section/heading this appears under")
     dependencies: List[str] = Field(default_factory=list, description="External dependencies needed")
