@@ -41,6 +41,7 @@ function App() {
   const [docPaneCollapsed, setDocPaneCollapsed] = useState(false);
   const [viewMode, setViewMode] = useState<'documents' | 'walkthroughs' | 'api-coverage'>('documents');
   const [apiCompleteness, setApiCompleteness] = useState<APICompletenessOutput | null>(null);
+  const [showAllUndocumented, setShowAllUndocumented] = useState(false);
 
   // Wait for config to be initialized from backend
   useEffect(() => {
@@ -573,9 +574,14 @@ function App() {
                 {apiCompleteness.undocumented_apis.length > 0 && (
                   <div className="border border-border rounded-lg overflow-hidden">
                     <div className="p-4 bg-muted border-b border-border">
-                      <h3 className="text-lg font-semibold">High Priority Undocumented APIs</h3>
+                      <h3 className="text-lg font-semibold">
+                        {showAllUndocumented ? 'All Undocumented APIs' : 'High Priority Undocumented APIs'}
+                      </h3>
                       <p className="text-sm text-muted-foreground">
-                        APIs that should be documented based on importance scoring
+                        {showAllUndocumented
+                          ? `Showing all ${apiCompleteness.undocumented_apis.length} undocumented APIs`
+                          : 'APIs that should be documented based on importance scoring'
+                        }
                       </p>
                     </div>
                     <div className="overflow-x-auto">
@@ -591,10 +597,11 @@ function App() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border">
-                          {apiCompleteness.undocumented_apis
-                            .filter(api => api.importance === 'high')
+                          {(showAllUndocumented
+                            ? apiCompleteness.undocumented_apis
+                            : apiCompleteness.undocumented_apis.filter(api => api.importance === 'high')
+                          )
                             .sort((a, b) => b.importance_score - a.importance_score)
-                            .slice(0, 20)
                             .map((api, idx) => (
                             <tr key={idx} className="hover:bg-muted/50">
                               <td className="px-4 py-3 text-sm font-mono">{api.api}</td>
@@ -620,6 +627,20 @@ function App() {
                         </tbody>
                       </table>
                     </div>
+                    {/* Show More/Less Button */}
+                    {apiCompleteness.undocumented_apis.length > apiCompleteness.undocumented_apis.filter(api => api.importance === 'high').length && (
+                      <div className="p-4 bg-muted border-t border-border flex justify-center">
+                        <button
+                          onClick={() => setShowAllUndocumented(!showAllUndocumented)}
+                          className="px-4 py-2 text-sm font-medium text-primary hover:text-primary/80 transition-colors"
+                        >
+                          {showAllUndocumented
+                            ? `Show Less (${apiCompleteness.undocumented_apis.filter(api => api.importance === 'high').length} high priority only)`
+                            : `Show All (${apiCompleteness.undocumented_apis.length - apiCompleteness.undocumented_apis.filter(api => api.importance === 'high').length} more)`
+                          }
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
 
