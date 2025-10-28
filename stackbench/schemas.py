@@ -428,6 +428,17 @@ class DeprecatedInDocs(BaseModel):
     suggestion: str = Field(description="Actionable suggestion for fixing docs")
 
 
+class DocumentationReference(BaseModel):
+    """Rich reference to where an API appears in documentation."""
+    document: str = Field(description="Document filename, e.g., 'pandas_and_pyarrow.md'")
+    section_hierarchy: List[str] = Field(default_factory=list, description="Section path, e.g., ['Pandas and PyArrow', 'Create dataset']")
+    markdown_anchor: Optional[str] = Field(None, description="Markdown anchor, e.g., '#create-dataset'")
+    line_number: int = Field(description="Line number in the document")
+    context_type: str = Field(description="How API appears: 'signature', 'example', or 'mention'")
+    code_block_index: Optional[int] = Field(None, description="Index of code block in section (0-based)")
+    raw_context: str = Field(description="Human-readable context description")
+
+
 class APIDetail(BaseModel):
     """Detailed coverage information for a single API."""
     api: str = Field(description="Full API identifier")
@@ -435,6 +446,14 @@ class APIDetail(BaseModel):
     type: str = Field(description="API type: function/class/method/property")
     is_deprecated: bool = Field(default=False, description="Whether deprecated")
     coverage_tier: int = Field(description="0=undocumented, 1=mentioned, 2=has_example, 3=dedicated_section")
+
+    # Rich documentation references (NEW)
+    documentation_references: List[DocumentationReference] = Field(
+        default_factory=list,
+        description="Detailed references to where this API is documented"
+    )
+
+    # Backward compatible fields (derived from documentation_references)
     documented_in: List[str] = Field(default_factory=list, description="Pages that document this API")
     has_examples: bool = Field(default=False, description="Whether API appears in code examples")
     has_dedicated_section: bool = Field(default=False, description="Whether API has its own section")

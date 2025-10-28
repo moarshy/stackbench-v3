@@ -112,8 +112,8 @@ This returns:
   "deprecated_count": N
 }}
 
-STEP 2: Read Extraction Files
-==============================
+STEP 2: Read Extraction Files and BUILD RICH REFERENCES
+========================================================
 Read all *_analysis.json files from: {extraction_folder}
 
 For each file, extract:
@@ -121,15 +121,38 @@ For each file, extract:
 - examples: List of code examples
 - document_page: Page name
 
-Build a map of:
-- Which APIs appear in signatures (tier 1)
-- Which APIs appear in code examples (tier 2)
-- Which APIs have dedicated context/sections (tier 3)
+For EACH API found, create DocumentationReference objects with rich context:
 
-Look for patterns like:
-- Signature in list: "lancedb.connect(uri, ...)" → mentioned
-- In code example: "db = lancedb.connect(...)" → has example
-- Has section heading: "## Connecting to LanceDB" with content about connect() → dedicated
+**From signatures:**
+{{
+  "document": "pandas_and_pyarrow.md",
+  "section_hierarchy": sig["section_hierarchy"],  # e.g., ["Pandas and PyArrow", "Create dataset"]
+  "markdown_anchor": sig["markdown_anchor"],       # e.g., "#create-dataset"
+  "line_number": sig["line"],                      # e.g., 50
+  "context_type": "signature",
+  "code_block_index": sig.get("code_block_index"), # e.g., 0
+  "raw_context": sig["context"]                    # e.g., "Create dataset - connecting to LanceDB"
+}}
+
+**From code examples (parse code to find API calls):**
+{{
+  "document": "pandas_and_pyarrow.md",
+  "section_hierarchy": example["section_hierarchy"],
+  "markdown_anchor": example["markdown_anchor"],
+  "line_number": example["line"],
+  "context_type": "example",
+  "code_block_index": example.get("code_block_index"),
+  "raw_context": example["context"]
+}}
+
+Build a map of:
+- api_id → List[DocumentationReference]
+- Which APIs appear where (document, line, section, type)
+
+From these references, derive:
+- documented_in: unique list of documents
+- has_examples: any reference with context_type="example"
+- has_dedicated_section: check if section_hierarchy indicates dedicated API section
 
 STEP 3: Calculate Importance Scores (MCP)
 ==========================================
@@ -220,7 +243,18 @@ Respond with ONLY this JSON structure (no explanatory text):
       "type": "function",
       "is_deprecated": false,
       "coverage_tier": 3,
-      "documented_in": ["quickstart.md", "api-reference.md"],
+      "documentation_references": [
+        {{
+          "document": "pandas_and_pyarrow.md",
+          "section_hierarchy": ["Pandas and PyArrow", "Create dataset"],
+          "markdown_anchor": "#create-dataset",
+          "line_number": 50,
+          "context_type": "signature",
+          "code_block_index": 0,
+          "raw_context": "Create dataset - connecting to LanceDB database"
+        }}
+      ],
+      "documented_in": ["pandas_and_pyarrow.md"],
       "has_examples": true,
       "has_dedicated_section": true,
       "importance": "high",
