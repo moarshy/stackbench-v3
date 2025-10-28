@@ -421,12 +421,12 @@ class APICompletenessAgent:
             permission_mode="acceptEdits",
             hooks=hooks,
             cwd=str(Path.cwd()),
-            mcpServers=[{
-                "name": "api-completeness",
-                "command": "python",
-                "args": ["-m", "stackbench.mcp_servers.api_completeness_server"],
-                "transport": "stdio"
-            }]
+            mcp_servers={
+                "api-completeness": {
+                    "command": "python",
+                    "args": ["-m", "stackbench.mcp_servers.api_completeness_server"],
+                }
+            }
         )
 
         async with ClaudeSDKClient(options=options) as client:

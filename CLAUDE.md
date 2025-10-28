@@ -44,7 +44,7 @@ This approach combines static analysis (fast, deterministic), dynamic testing (c
 
 ## Architecture
 
-### Four-Agent Pipeline
+### Five-Agent Pipeline
 
 Stackbench uses a pipeline of specialized Claude Code agents:
 
@@ -55,6 +55,16 @@ Stackbench uses a pipeline of specialized Claude Code agents:
 │  • Extracts API signatures (function names, parameters)     │
 │  • Extracts code examples (executable snippets)             │
 │  • Outputs structured JSON (validated via hooks)            │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────┐
+│         API COMPLETENESS & DEPRECATION AGENT (MCP)          │
+│  • MCP server: introspects library (pip + inspect module)   │
+│  • MCP server: calculates importance scores (heuristics)    │
+│  • Agent: reads extraction files, matches APIs to docs      │
+│  • Agent: calls MCP for deterministic calculations          │
+│  • Outputs: coverage %, undocumented APIs, deprecated APIs  │
+│  • Output: results/api_completeness/completeness_analysis.json │
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -74,8 +84,9 @@ Stackbench uses a pipeline of specialized Claude Code agents:
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
-│           DOCUMENTATION CLARITY VALIDATION AGENT            │
+│      DOCUMENTATION CLARITY VALIDATION AGENT (MCP)           │
 │  • LLM-as-judge system for user experience quality          │
+│  • MCP server: deterministic scoring calculations           │
 │  • Pre-processes MkDocs Material snippet includes           │
 │  • Evaluates: instruction clarity, logical flow, prereqs    │
 │  • Scores 5 dimensions on 0-10 scale with rubric            │
@@ -419,17 +430,24 @@ INPUT: GitHub Repository
 3. For each document (parallel):
    Extract Agent → data/<run_id>/results/extraction/<doc>_analysis.json
     ↓
-4. For each extraction file (sequential):
-   API Validation Agent → data/<run_id>/results/api_validation/<doc>_validation.json
+4. API Completeness Agent (after all extractions complete):
+   • Uses MCP server for deterministic library introspection
+   • Reads ALL extraction files to aggregate documented APIs
+   • Calculates coverage metrics and importance scores
+   → data/<run_id>/results/api_completeness/completeness_analysis.json
     ↓
 5. For each extraction file (sequential):
+   API Validation Agent → data/<run_id>/results/api_validation/<doc>_validation.json
+    ↓
+6. For each extraction file (sequential):
    Code Validation Agent → data/<run_id>/results/code_validation/<doc>_validation.json
     ↓
-6. For each document (parallel):
+7. For each document (parallel):
    Clarity Validation Agent → data/<run_id>/results/clarity_validation/<doc>_clarity.json
-   (Reads extraction metadata, original markdown, and optionally API/code validation results)
+   • Uses MCP server for deterministic scoring calculations
+   • Reads extraction metadata, original markdown, and optionally API/code validation results
     ↓
-OUTPUT: Summary statistics + detailed JSON reports + clarity scores
+OUTPUT: Summary statistics + detailed JSON reports + clarity scores + coverage metrics
 ```
 
 ## Use Cases
@@ -625,9 +643,14 @@ stackbench-v3/
 ├── stackbench/           # Python package
 │   ├── agents/          # Core validation agents
 │   │   ├── extraction_agent.py
+│   │   ├── api_completeness_agent.py        # NEW: Coverage & deprecation (with MCP)
 │   │   ├── api_validation_agent.py
 │   │   ├── code_validation_agent.py
 │   │   └── clarity_agent.py
+│   ├── mcp_servers/     # MCP servers for deterministic operations ✨
+│   │   ├── __init__.py
+│   │   ├── api_completeness_server.py       # NEW: Library introspection & scoring
+│   │   └── clarity_scoring_server.py        # Deterministic clarity scoring
 │   ├── walkthroughs/    # Walkthrough validation system ✨
 │   │   ├── __init__.py
 │   │   ├── schemas.py                      # Walkthrough data models
@@ -635,16 +658,16 @@ stackbench-v3/
 │   │   ├── walkthrough_audit_agent.py      # Execute walkthroughs
 │   │   ├── mcp_server.py                   # MCP server for step delivery
 │   │   └── README.md                       # Module documentation
-│   ├── cache/           # Caching system ✨ NEW
+│   ├── cache/           # Caching system ✨
 │   │   ├── __init__.py
 │   │   └── manager.py               # JSON-based cache operations
 │   ├── hooks/           # Validation hooks, Logging hooks, Hook manager
-│   │   ├── validation.py            # All validation schemas (core + walkthrough)
+│   │   ├── validation.py            # All validation schemas (core + walkthrough + completeness)
 │   │   └── manager.py               # Routes all agents to hooks
 │   ├── pipeline/        # Pipeline orchestration
-│   │   └── runner.py                # Core pipeline with caching integration
+│   │   └── runner.py                # Core pipeline with caching integration + completeness
 │   ├── repository/      # Git repository management (commit resolution)
-│   ├── schemas/         # Pydantic models (core pipeline)
+│   ├── schemas/         # Pydantic models (core pipeline + API completeness)
 │   └── cli.py           # CLI entry point (core + walkthrough commands)
 ├── frontend/            # React web interface
 ├── docs/                # Project documentation
@@ -653,16 +676,19 @@ stackbench-v3/
 │   └── demo-nextjs-walkthrough.json        # Real example (10 steps)
 ├── tests/               # Test suite
 └── data/                # Output directory (gitignored)
-    ├── runs.json                            # Cache index ✨ NEW
+    ├── runs.json                            # Cache index ✨
     └── <run_id>/
         ├── repository/                      # Cloned git repo
         ├── metadata.json                    # Enhanced with doc_commit_hash, docs_path
         ├── results/                         # Core pipeline results
         │   ├── extraction/
+        │   ├── api_completeness/            # NEW: Coverage analysis
+        │   │   └── completeness_analysis.json
         │   ├── api_validation/
         │   ├── code_validation/
         │   └── clarity_validation/
         ├── validation_logs/                 # Core pipeline logs
+        │   ├── api_completeness_logs/       # NEW: Completeness agent logs
         │   └── clarity_logs/
         └── walkthroughs/                    # Walkthrough outputs ✨
             └── wt_<uuid>/

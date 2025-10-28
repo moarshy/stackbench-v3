@@ -2,12 +2,16 @@
 
 ## Objective
 
-The API Completeness Agent analyzes **documentation coverage** by discovering all public APIs in a library and cross-referencing them with what's actually documented. It:
-- Introspects the library to discover all public APIs
-- Aggregates documented APIs from all extraction results
-- Calculates tiered coverage (mentioned, has example, dedicated section)
-- Identifies undocumented APIs ranked by importance
-- Detects deprecated APIs still taught in documentation
+The API Completeness Agent analyzes **documentation coverage** using a two-tier architecture:
+- **MCP Server (Deterministic)**: Library introspection, importance scoring, coverage calculations
+- **Agent (Qualitative)**: Reading extraction files, matching APIs to docs, orchestrating MCP calls
+
+It:
+- Introspects the library to discover all public APIs (via MCP)
+- Aggregates documented APIs from all extraction results (agent)
+- Calculates tiered coverage and importance scores (via MCP)
+- Identifies undocumented APIs ranked by importance (via MCP)
+- Detects deprecated APIs still taught in documentation (via MCP)
 
 This agent catches **missing documentation** and **deprecated API usage** - ensuring completeness and currency.
 
@@ -20,10 +24,13 @@ This agent catches **missing documentation** and **deprecated API usage** - ensu
             ↓
             ↓ (extraction/*.json - ALL docs)
             ↓
-┌─────────────────────────┐
-│ API COMPLETENESS AGENT  │ ◄── YOU ARE HERE
-│  (Single Run)           │
-└─────────────────────────┘
+┌─────────────────────────────────────┐
+│ API COMPLETENESS AGENT (MCP)        │ ◄── YOU ARE HERE
+│  • MCP: Library introspection       │
+│  • MCP: Importance scoring           │
+│  • Agent: Doc pattern matching       │
+│  • MCP: Coverage calculation         │
+└─────────────────────────────────────┘
             ↓
             ↓ (completeness_analysis.json)
             ↓
@@ -34,6 +41,25 @@ This agent catches **missing documentation** and **deprecated API usage** - ensu
 **Runs**: Single execution (not per-document)
 **Dependencies**: ALL extraction results
 **Consumers**: Dashboard, coverage reports
+**MCP Server**: `stackbench.mcp_servers.api_completeness_server`
+
+## Architecture: Agent + MCP Server
+
+### MCP Server Responsibilities (Deterministic)
+- **Library Introspection**: `pip install` + `inspect` module
+- **API Discovery**: Find all public functions, classes, methods
+- **Deprecation Detection**: Check decorators, docstrings, warnings
+- **Importance Scoring**: Heuristic-based ranking (0-10)
+- **Coverage Classification**: Tier assignment (0-3)
+- **Metrics Calculation**: Coverage percentages
+- **Prioritization**: Rank undocumented APIs
+
+### Agent Responsibilities (Qualitative)
+- **Read Extraction Files**: Load all `*_analysis.json` files
+- **Pattern Matching**: Identify which APIs appear in docs
+- **Context Understanding**: Detect dedicated sections vs mentions
+- **MCP Orchestration**: Call MCP tools in correct sequence
+- **Output Building**: Construct final JSON report
 
 ## Inputs
 
@@ -48,6 +74,7 @@ This agent catches **missing documentation** and **deprecated API usage** - ensu
 - **`validation_log_dir`** (Path): Directory for logs
 
 ### Environment
+- MCP server (`stackbench.mcp_servers.api_completeness_server`)
 - Python environment with pip and `inspect` module
 - Network access for `pip install`
 
@@ -107,26 +134,6 @@ output_folder/
       "reason": "In __all__, has docstring, common CRUD operation",
       "has_docstring": true,
       "is_async": false
-    },
-    {
-      "api": "lancedb.Database.list_tables",
-      "module": "lancedb.db",
-      "type": "method",
-      "importance": "high",
-      "importance_score": 7,
-      "reason": "In __all__, has docstring, discovery operation",
-      "has_docstring": true,
-      "is_async": false
-    },
-    {
-      "api": "lancedb.Config.from_env",
-      "module": "lancedb",
-      "type": "method",
-      "importance": "medium",
-      "importance_score": 5,
-      "reason": "Has docstring, configuration helper",
-      "has_docstring": true,
-      "is_async": false
     }
   ],
 
@@ -155,30 +162,6 @@ output_folder/
       "has_dedicated_section": true,
       "importance": "high",
       "importance_score": 9
-    },
-    {
-      "api": "lancedb.Database.create_table",
-      "module": "lancedb.db",
-      "type": "method",
-      "is_deprecated": false,
-      "coverage_tier": 2,
-      "documented_in": ["quickstart.md"],
-      "has_examples": true,
-      "has_dedicated_section": false,
-      "importance": "high",
-      "importance_score": 8
-    },
-    {
-      "api": "lancedb.Database.drop_table",
-      "module": "lancedb.db",
-      "type": "method",
-      "is_deprecated": false,
-      "coverage_tier": 0,
-      "documented_in": [],
-      "has_examples": false,
-      "has_dedicated_section": false,
-      "importance": "high",
-      "importance_score": 8
     }
   ],
 
@@ -199,318 +182,381 @@ output_folder/
 
 ```python
 async def analyze_completeness(extraction_folder, library_name, library_version):
-    """Analyze API completeness across all documentation."""
+    """Analyze API completeness using MCP server."""
 
-    # 1. Ask Claude to do 3-phase analysis
+    # 1. Setup MCP server
+    mcp_config = {
+        "api-completeness": {
+            "command": "python",
+            "args": ["-m", "stackbench.mcp_servers.api_completeness_server"],
+            "transport": "stdio"
+        }
+    }
+
+    # 2. Create Claude agent with MCP
+    options = ClaudeAgentOptions(
+        system_prompt=COMPLETENESS_SYSTEM_PROMPT,
+        allowed_tools=["Read", "Write"],
+        mcp_servers=mcp_config
+    )
+
+    # 3. Ask Claude to orchestrate analysis
     prompt = f"""
     Analyze API completeness for {library_name} v{library_version}.
 
     Extraction files: {extraction_folder}
 
-    PHASE 1: DISCOVER LIBRARY API SURFACE
-    1. Install {library_name}=={library_version}
-    2. Introspect all public APIs (functions, classes, methods)
-    3. Detect deprecated APIs (@deprecated, DeprecationWarning)
-    4. Calculate importance score (0-10) for each API:
-       - In __all__: +3
-       - Has docstring: +2
-       - Not underscore-prefixed: +1
-       - Top-level module: +1
-       - Common name (connect, create, get): +1
-    5. Group by module and type
+    WORKFLOW:
+    1. Call MCP: introspect_library()
+    2. Read extraction files (agent)
+    3. Call MCP: calculate_importance_score() for each API
+    4. Call MCP: classify_coverage() for each API
+    5. Call MCP: calculate_metrics()
+    6. Call MCP: prioritize_undocumented()
+    7. Build output JSON
 
-    PHASE 2: AGGREGATE DOCUMENTATION COVERAGE
-    6. Read all *_analysis.json files from {extraction_folder}
-    7. For each extraction:
-       - Extract documented API signatures
-       - Extract code examples
-       - Track which APIs appear where
-    8. Classify coverage tiers:
-       - Tier 0: Undocumented (not mentioned)
-       - Tier 1: Mentioned (in signatures)
-       - Tier 2: Has examples (in code examples)
-       - Tier 3: Dedicated section (context indicates focus)
-
-    PHASE 3: CROSS-REFERENCE & ANALYZE
-    9. Cross-reference library APIs with documented APIs
-    10. Identify undocumented APIs (tier 0), ranked by importance
-    11. Identify deprecated APIs in docs
-    12. Calculate coverage percentages
-
-    Output JSON ONLY.
+    Use MCP tools for ALL calculations.
     """
 
-    response = await claude.query(prompt)
+    async with ClaudeSDKClient(options=options) as client:
+        response = await client.query(prompt)
 
-    # 2. Parse and validate
+    # 4. Parse and return
     analysis_data = parse_json(response)
-    validate_against_schema(analysis_data)
-
-    # 3. Save result
-    output = APICompletenessOutput(**analysis_data)
-    save_json(output_folder / "completeness_analysis.json", output)
-
-    return output
+    return APICompletenessOutput(**analysis_data)
 
 
-# What Claude does internally
-def claude_completeness_logic(library_name, library_version, extraction_folder):
-    """Claude's 3-phase analysis."""
+# What Claude does (orchestration)
+def claude_orchestration_logic(extraction_folder, library_name, library_version):
+    """Claude orchestrates MCP calls and file reading."""
 
-    # PHASE 1: DISCOVER LIBRARY API SURFACE
-    # 1. Install library
-    run_bash(f"pip install {library_name}=={library_version}")
+    # STEP 1: Introspect library (MCP)
+    introspection_result = call_mcp_tool("introspect_library", {
+        "library_name": library_name,
+        "version": library_version,
+        "modules": [library_name]
+    })
 
-    # 2. Introspect all public APIs
-    import inspect
-    import importlib
-    import warnings
+    # Response:
+    # {
+    #   "apis": [
+    #     {"api": "lancedb.connect", "module": "lancedb", "type": "function",
+    #      "has_docstring": true, "in_all": true, "is_deprecated": false, ...},
+    #     ...
+    #   ],
+    #   "deprecated_count": 3
+    # }
 
-    lib = importlib.import_module(library_name)
-    discovered_apis = []
+    discovered_apis = introspection_result["apis"]
 
-    # Find all public modules
-    for module_name in find_submodules(lib):
-        module = importlib.import_module(module_name)
-
-        # Get __all__ if present
-        public_names = getattr(module, '__all__', None)
-
-        # Discover functions and classes
-        for name, obj in inspect.getmembers(module):
-            # Skip private unless in __all__
-            if name.startswith('_') and (not public_names or name not in public_names):
-                continue
-
-            # Determine type
-            if inspect.isfunction(obj):
-                api_type = "function"
-            elif inspect.isclass(obj):
-                api_type = "class"
-                # Also get class methods
-                for method_name, method_obj in inspect.getmembers(obj):
-                    if not method_name.startswith('_') or (public_names and method_name in public_names):
-                        if inspect.ismethod(method_obj) or inspect.isfunction(method_obj):
-                            discovered_apis.append({
-                                "api": f"{name}.{method_name}",
-                                "module": module_name,
-                                "type": "method",
-                                ...
-                            })
-            elif inspect.ismethod(obj):
-                api_type = "method"
-            elif isinstance(obj, property):
-                api_type = "property"
-            else:
-                continue
-
-            # Check for deprecation
-            is_deprecated = False
-            deprecation_message = None
-
-            # Strategy 1: Check for @deprecated decorator
-            if hasattr(obj, '__deprecated__'):
-                is_deprecated = True
-                deprecation_message = obj.__deprecated__
-
-            # Strategy 2: Check docstring for deprecation
-            if obj.__doc__ and 'deprecated' in obj.__doc__.lower():
-                is_deprecated = True
-                deprecation_message = extract_deprecation_from_docstring(obj.__doc__)
-
-            # Strategy 3: Try calling and catch warnings
-            with warnings.catch_warnings(record=True) as w:
-                warnings.simplefilter("always")
-                try:
-                    # Try getting signature (may trigger warning)
-                    inspect.signature(obj)
-                except:
-                    pass
-
-                if w and any(issubclass(warning.category, DeprecationWarning) for warning in w):
-                    is_deprecated = True
-                    deprecation_message = str(w[0].message)
-
-            # Calculate importance score
-            importance_score = 0
-            if public_names and name in public_names:
-                importance_score += 3
-            if obj.__doc__:
-                importance_score += 2
-            if not name.startswith('_'):
-                importance_score += 1
-            if module_name == library_name:  # Top-level
-                importance_score += 1
-            if name in ['connect', 'create', 'get', 'open', 'close', 'add', 'update', 'delete']:
-                importance_score += 1
-
-            # Classify importance
-            if importance_score > 6:
-                importance = "high"
-            elif importance_score >= 3:
-                importance = "medium"
-            else:
-                importance = "low"
-
-            discovered_apis.append({
-                "api": f"{module_name}.{name}",
-                "module": module_name,
-                "type": api_type,
-                "is_deprecated": is_deprecated,
-                "deprecation_message": deprecation_message,
-                "has_docstring": bool(obj.__doc__),
-                "is_async": inspect.iscoroutinefunction(obj),
-                "in_all": public_names and name in public_names,
-                "importance": importance,
-                "importance_score": importance_score
-            })
-
-    # PHASE 2: AGGREGATE DOCUMENTATION COVERAGE
-    # 3. Read all extraction files
+    # STEP 2: Read extraction files (agent)
     extraction_files = glob(extraction_folder, "*_analysis.json")
 
-    documented_apis = {}  # api -> [pages, tier]
+    documented_apis = {}  # api -> {pages: [...], in_examples: bool, ...}
 
     for extraction_file in extraction_files:
         data = load_json(extraction_file)
-        page_name = data["page"]
+        page = data["page"]
 
-        # Check signatures
+        # Check signatures (tier 1)
         for sig in data.get("signatures", []):
             api_id = f"{sig['library']}.{sig['function']}"
-            if sig.get('method_chain'):
-                api_id = f"{sig['method_chain']}.{sig['function']}"
-
             if api_id not in documented_apis:
                 documented_apis[api_id] = {
                     "pages": [],
-                    "tier": 1  # Mentioned
+                    "in_examples": False,
+                    "has_section": False
                 }
+            documented_apis[api_id]["pages"].append(page)
 
-            documented_apis[api_id]["pages"].append(page_name)
-
-        # Check examples
+        # Check code examples (tier 2)
         for example in data.get("examples", []):
-            # Parse code to find API calls
-            api_calls = extract_api_calls(example["code"], library_name)
-
+            api_calls = extract_api_calls_from_code(example["code"])
             for api_call in api_calls:
                 if api_call in documented_apis:
-                    # Upgrade tier to 2 (has example)
-                    documented_apis[api_call]["tier"] = max(
-                        documented_apis[api_call]["tier"],
-                        2
-                    )
-                else:
-                    documented_apis[api_call] = {
-                        "pages": [page_name],
-                        "tier": 2
-                    }
+                    documented_apis[api_call]["in_examples"] = True
 
-        # Check for dedicated sections
-        # If context/section hierarchy indicates focus on specific API
+        # Check for dedicated sections (tier 3)
         for sig in data.get("signatures", []):
             api_id = f"{sig['library']}.{sig['function']}"
-            if is_dedicated_section(sig.get("section_hierarchy", []), sig["function"]):
-                if api_id in documented_apis:
-                    documented_apis[api_id]["tier"] = 3
+            if has_dedicated_context(sig.get("section_hierarchy", [])):
+                documented_apis[api_id]["has_section"] = True
 
-    # PHASE 3: CROSS-REFERENCE & ANALYZE
-    # 4. Cross-reference
-    api_details = []
-    undocumented_apis = []
-    deprecated_in_docs = []
+    # STEP 3: Calculate importance scores (MCP)
+    importance_scores = {}
+
+    for api_obj in discovered_apis:
+        score_result = call_mcp_tool("calculate_importance_score", {
+            "api": api_obj["api"],
+            "module": api_obj["module"],
+            "type": api_obj["type"],
+            "has_docstring": api_obj["has_docstring"],
+            "in_all": api_obj["in_all"]
+        })
+
+        # Response: {"importance_score": 8, "importance": "high"}
+        importance_scores[api_obj["api"]] = score_result
+
+    # STEP 4: Classify coverage (MCP)
+    coverage_tiers = {}
 
     for api_obj in discovered_apis:
         api_id = api_obj["api"]
+        doc_info = documented_apis.get(api_id, {})
 
-        # Check if documented
-        if api_id in documented_apis:
-            doc_info = documented_apis[api_id]
+        coverage_result = call_mcp_tool("classify_coverage", {
+            "api": api_id,
+            "documented_in": doc_info.get("pages", []),
+            "appears_in_examples": doc_info.get("in_examples", False),
+            "has_dedicated_section": doc_info.get("has_section", False)
+        })
 
-            api_details.append({
-                "api": api_id,
-                "module": api_obj["module"],
-                "type": api_obj["type"],
-                "is_deprecated": api_obj["is_deprecated"],
-                "coverage_tier": doc_info["tier"],
-                "documented_in": doc_info["pages"],
-                "has_examples": doc_info["tier"] >= 2,
-                "has_dedicated_section": doc_info["tier"] == 3,
-                "importance": api_obj["importance"],
-                "importance_score": api_obj["importance_score"]
-            })
+        # Response: {"coverage_tier": 2}
+        coverage_tiers[api_id] = coverage_result["coverage_tier"]
 
-            # Check if deprecated but still documented
-            if api_obj["is_deprecated"]:
-                deprecated_in_docs.append({
-                    "api": api_id,
-                    "module": api_obj["module"],
-                    "deprecated_since": extract_version(api_obj["deprecation_message"]),
-                    "alternative": extract_alternative(api_obj["deprecation_message"]),
-                    "documented_in": doc_info["pages"],
-                    "severity": "critical",
-                    "deprecation_message": api_obj["deprecation_message"],
-                    "suggestion": f"Replace {api_id} in {', '.join(doc_info['pages'])}"
-                })
-        else:
-            # Undocumented
-            undocumented_apis.append({
-                "api": api_id,
-                "module": api_obj["module"],
-                "type": api_obj["type"],
-                "importance": api_obj["importance"],
-                "importance_score": api_obj["importance_score"],
-                "reason": explain_importance(api_obj),
-                "has_docstring": api_obj["has_docstring"],
-                "is_async": api_obj["is_async"]
-            })
+    # STEP 5: Calculate metrics (MCP)
+    coverage_data = [
+        {"api": api_obj["api"], "tier": coverage_tiers[api_obj["api"]]}
+        for api_obj in discovered_apis
+    ]
 
-            api_details.append({
-                "api": api_id,
-                "coverage_tier": 0,
-                "documented_in": [],
-                "has_examples": False,
-                "has_dedicated_section": False,
-                ...
-            })
+    metrics_result = call_mcp_tool("calculate_metrics", {
+        "coverage_data": coverage_data
+    })
 
-    # Sort undocumented by importance
-    undocumented_apis.sort(key=lambda x: x["importance_score"], reverse=True)
+    # Response:
+    # {
+    #   "total_apis": 45,
+    #   "documented": 32,
+    #   "with_examples": 28,
+    #   "with_dedicated_sections": 15,
+    #   "coverage_percentage": 71.1,
+    #   ...
+    # }
 
-    # 5. Calculate summary
-    total_apis = len(discovered_apis)
-    documented = len([api for api in api_details if api["coverage_tier"] >= 1])
-    with_examples = len([api for api in api_details if api["coverage_tier"] >= 2])
-    with_sections = len([api for api in api_details if api["coverage_tier"] == 3])
-    undocumented = len([api for api in api_details if api["coverage_tier"] == 0])
+    # STEP 6: Prioritize undocumented (MCP)
+    undocumented_api_names = [
+        api_obj["api"] for api_obj in discovered_apis
+        if coverage_tiers[api_obj["api"]] == 0
+    ]
 
+    prioritization_result = call_mcp_tool("prioritize_undocumented", {
+        "undocumented_apis": undocumented_api_names,
+        "importance_scores": importance_scores
+    })
+
+    # Response:
+    # {
+    #   "prioritized": [
+    #     {"api": "lancedb.Database.drop_table", "importance_score": 8, ...},
+    #     ...
+    #   ]
+    # }
+
+    # STEP 7: Build output JSON
     return {
         "api_surface": {
-            "total_public_apis": total_apis,
+            "total_public_apis": len(discovered_apis),
             "by_module": group_by_module(discovered_apis),
             "by_type": count_by_type(discovered_apis),
-            "deprecated_count": len([a for a in discovered_apis if a["is_deprecated"]])
+            "deprecated_count": introspection_result["deprecated_count"]
         },
-        "coverage_summary": {
-            "total_apis": total_apis,
+        "coverage_summary": metrics_result,
+        "undocumented_apis": prioritization_result["prioritized"],
+        "deprecated_in_docs": find_deprecated_in_docs(discovered_apis, documented_apis),
+        "api_details": build_api_details(discovered_apis, coverage_tiers, importance_scores)
+    }
+
+
+# MCP Server (deterministic operations)
+class APICompletenessMCPServer:
+    """MCP server for API completeness analysis."""
+
+    @mcp_tool
+    def introspect_library(self, library_name: str, version: str, modules: list[str]):
+        """Introspect library to discover all public APIs."""
+
+        # 1. Install library
+        run_bash(f"pip install {library_name}=={version}")
+
+        # 2. Import and discover
+        import inspect
+        import importlib
+        import warnings
+
+        discovered_apis = []
+
+        for module_name in modules:
+            module = importlib.import_module(module_name)
+
+            # Get __all__ if present
+            public_names = getattr(module, '__all__', None)
+
+            # Discover all members
+            for name, obj in inspect.getmembers(module):
+                # Skip private unless in __all__
+                if name.startswith('_') and (not public_names or name not in public_names):
+                    continue
+
+                # Determine type
+                if inspect.isfunction(obj):
+                    api_type = "function"
+                elif inspect.isclass(obj):
+                    api_type = "class"
+                    # Also discover class methods
+                    for method_name, method_obj in inspect.getmembers(obj):
+                        # ... (discover methods)
+                elif inspect.ismethod(obj):
+                    api_type = "method"
+                else:
+                    continue
+
+                # Check deprecation
+                is_deprecated = check_deprecation(obj)
+
+                discovered_apis.append({
+                    "api": f"{module_name}.{name}",
+                    "module": module_name,
+                    "type": api_type,
+                    "has_docstring": bool(obj.__doc__),
+                    "in_all": public_names and name in public_names,
+                    "is_deprecated": is_deprecated,
+                    "is_async": inspect.iscoroutinefunction(obj)
+                })
+
+        return {
+            "apis": discovered_apis,
+            "deprecated_count": len([a for a in discovered_apis if a["is_deprecated"]])
+        }
+
+    @mcp_tool
+    def calculate_importance_score(self, api: str, module: str, type: str,
+                                     has_docstring: bool, in_all: bool):
+        """Calculate importance score for an API."""
+
+        score = 0
+
+        # In __all__
+        if in_all:
+            score += 3
+
+        # Has docstring
+        if has_docstring:
+            score += 2
+
+        # Not private
+        if not api.split('.')[-1].startswith('_'):
+            score += 1
+
+        # Top-level module
+        if module == module.split('.')[0]:
+            score += 1
+
+        # Common name
+        common_names = ['connect', 'create', 'get', 'open', 'close', 'add', 'update', 'delete']
+        if any(name in api.lower() for name in common_names):
+            score += 1
+
+        # Classify
+        if score >= 7:
+            importance = "high"
+        elif score >= 4:
+            importance = "medium"
+        else:
+            importance = "low"
+
+        return {
+            "importance_score": score,
+            "importance": importance
+        }
+
+    @mcp_tool
+    def classify_coverage(self, api: str, documented_in: list[str],
+                          appears_in_examples: bool, has_dedicated_section: bool):
+        """Classify coverage tier."""
+
+        if has_dedicated_section:
+            tier = 3
+        elif appears_in_examples:
+            tier = 2
+        elif documented_in:
+            tier = 1
+        else:
+            tier = 0
+
+        return {"coverage_tier": tier}
+
+    @mcp_tool
+    def calculate_metrics(self, coverage_data: list[dict]):
+        """Calculate coverage percentages."""
+
+        total = len(coverage_data)
+        documented = len([x for x in coverage_data if x["tier"] >= 1])
+        with_examples = len([x for x in coverage_data if x["tier"] >= 2])
+        with_sections = len([x for x in coverage_data if x["tier"] == 3])
+        undocumented = len([x for x in coverage_data if x["tier"] == 0])
+
+        return {
+            "total_apis": total,
             "documented": documented,
             "with_examples": with_examples,
             "with_dedicated_sections": with_sections,
             "undocumented": undocumented,
-            "coverage_percentage": round(documented / total_apis * 100, 1),
-            "example_coverage_percentage": round(with_examples / total_apis * 100, 1),
-            "complete_coverage_percentage": round(with_sections / total_apis * 100, 1)
-        },
-        "undocumented_apis": undocumented_apis[:20],  # Top 20
-        "deprecated_in_docs": deprecated_in_docs,
-        "api_details": api_details
-    }
+            "coverage_percentage": round(documented / total * 100, 1) if total else 0.0,
+            "example_coverage_percentage": round(with_examples / total * 100, 1) if total else 0.0,
+            "complete_coverage_percentage": round(with_sections / total * 100, 1) if total else 0.0
+        }
+
+    @mcp_tool
+    def prioritize_undocumented(self, undocumented_apis: list[str],
+                                importance_scores: dict):
+        """Rank undocumented APIs by importance."""
+
+        prioritized = []
+
+        for api in undocumented_apis:
+            score_info = importance_scores.get(api, {})
+            prioritized.append({
+                "api": api,
+                "importance_score": score_info.get("importance_score", 0),
+                "importance": score_info.get("importance", "low")
+            })
+
+        # Sort by score (descending)
+        prioritized.sort(key=lambda x: x["importance_score"], reverse=True)
+
+        return {"prioritized": prioritized}
 ```
 
 ## Key Features
 
-### 1. **Importance Scoring Algorithm**
+### 1. **MCP Tools**
+
+Five deterministic tools provided by MCP server:
+
+```python
+# 1. Library introspection
+introspect_library(library_name, version, modules)
+# Returns: {apis: [...], deprecated_count: N}
+
+# 2. Importance scoring
+calculate_importance_score(api, module, type, has_docstring, in_all)
+# Returns: {importance_score: 8, importance: "high"}
+
+# 3. Coverage classification
+classify_coverage(api, documented_in, appears_in_examples, has_dedicated_section)
+# Returns: {coverage_tier: 2}
+
+# 4. Metrics calculation
+calculate_metrics(coverage_data)
+# Returns: {total_apis, documented, coverage_percentage, ...}
+
+# 5. Prioritization
+prioritize_undocumented(undocumented_apis, importance_scores)
+# Returns: {prioritized: [...]}
+```
+
+### 2. **Importance Scoring Algorithm** (MCP)
 
 ```python
 importance_score = 0
@@ -531,17 +577,27 @@ if module == library_name: importance_score += 1
 if name in ['connect', 'create', 'get', 'open', ...]: importance_score += 1
 
 # Classification:
-# high: > 6, medium: 3-6, low: < 3
+# high: >= 7, medium: 4-6, low: 0-3
 ```
 
-### 2. **Coverage Tiers**
+### 3. **Coverage Tiers** (MCP)
 
-- **Tier 0**: Undocumented (not mentioned anywhere)
-- **Tier 1**: Mentioned (appears in signatures list)
-- **Tier 2**: Has examples (used in code examples)
-- **Tier 3**: Dedicated section (has own section/heading)
+Deterministic classification:
 
-### 3. **Deprecation Detection Strategies**
+```python
+if has_dedicated_section:
+    tier = 3  # "Dedicated section"
+elif appears_in_examples:
+    tier = 2  # "Has examples"
+elif documented_in:
+    tier = 1  # "Mentioned"
+else:
+    tier = 0  # "Undocumented"
+```
+
+### 4. **Deprecation Detection** (MCP)
+
+Three strategies:
 
 ```python
 # Strategy 1: @deprecated decorator
@@ -559,17 +615,23 @@ with warnings.catch_warnings(record=True) as w:
         is_deprecated = True
 ```
 
-### 4. **Cross-Module Discovery**
+### 5. **Agent Pattern Matching** (Qualitative)
 
-Recursively finds all submodules:
+Agent handles doc understanding:
+
 ```python
-# Discovers:
-lancedb
-lancedb.db
-lancedb.table
-lancedb.query
-lancedb.embeddings
-...
+# Detect API mentions in signatures
+for sig in signatures:
+    api_id = f"{sig['library']}.{sig['function']}"
+    # → Tier 1
+
+# Detect API usage in examples
+api_calls = parse_code_for_api_calls(example["code"])
+# → Tier 2
+
+# Detect dedicated sections
+if section_hierarchy == ["API Reference", "connect"]:
+    # → Tier 3
 ```
 
 ## Logging & Debugging
@@ -578,36 +640,87 @@ lancedb.embeddings
 ```
 validation_log_dir/api_completeness_logs/
 ├── agent.log       # Human-readable log
-├── tools.jsonl     # Bash, Read tool calls
+├── tools.jsonl     # Read/Write + MCP tool calls
 └── messages.jsonl  # Full Claude conversation
 ```
+
+### Log Contents
+- MCP tool calls (introspect_library, calculate_importance_score, etc.)
+- Read tool calls (extraction files)
+- Pattern matching decisions
+- Final output building
 
 ## Performance
 
 - **Single run**: Not per-document
-- **Typical duration**: ~5-10 seconds
-- **Bottlenecks**: Library introspection time
+- **Typical duration**: ~10-20 seconds
+- **Bottlenecks**:
+  - Library introspection (MCP: pip install + inspect)
+  - Reading many extraction files (agent)
+  - Multiple MCP tool calls
 
 ## Common Issues & Solutions
 
-### Issue: Many false "undocumented" for helper methods
-**Cause**: Introspection finding internal methods
-**Solution**: Filter by `__all__`, increase `_` prefix filtering
+### Issue: Many false "undocumented" for internal methods
+**Cause**: Introspection finding private methods
+**Solution**: MCP server filters by `__all__` and `_` prefix
 
 ### Issue: Missing deprecation warnings
 **Cause**: Library doesn't use standard patterns
-**Solution**: Add library-specific deprecation detection
+**Solution**: Enhance MCP server deprecation detection
 
 ### Issue: Coverage tier 0 for documented APIs
-**Cause**: API name mismatch (e.g., `connect` vs `lancedb.connect`)
-**Solution**: Normalize API identifiers during comparison
+**Cause**: API name mismatch in pattern matching
+**Solution**: Check agent logs for pattern matching results
+
+### Issue: MCP server fails to introspect
+**Cause**: Library installation failed
+**Solution**: Check MCP server logs for pip errors
+
+## Implementation Notes
+
+### Why MCP Server?
+
+```python
+# Alternative: Agent does introspection via Bash
+# ❌ Problems:
+# - Non-deterministic (LLM parsing)
+# - Complex bash commands in prompts
+# - Error-prone introspection logic
+
+# MCP Server approach:
+# ✅ Deterministic calculations
+# ✅ Clean separation of concerns
+# ✅ Reusable introspection logic
+# ✅ Easy to test and debug
+```
+
+### Agent vs MCP Division
+
+```python
+# MCP (Deterministic):
+# - pip install
+# - inspect module operations
+# - Score calculations
+# - Metric formulas
+# - Ranking algorithms
+
+# Agent (Qualitative):
+# - Reading markdown/JSON
+# - Pattern matching in text
+# - Understanding doc structure
+# - Orchestrating workflow
+# - Building final output
+```
 
 ## Related Documentation
 
 - **Schemas**: `stackbench/schemas.py` - `APICompletenessOutput`, `UndocumentedAPI`, `DeprecatedInDocs`
+- **MCP Server**: `stackbench/mcp_servers/api_completeness_server.py`
 - **CLI**: `stackbench run` automatically runs this agent
 
 ## See Also
 
 - [Extraction Agent](./extraction-agent.md) - Provides documented APIs
+- [Clarity Agent](./clarity-agent.md) - Also uses MCP for deterministic scoring
 - Dashboard: Uses this data for coverage visualization
