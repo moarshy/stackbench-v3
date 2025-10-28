@@ -24,6 +24,7 @@ from stackbench.agents import (
     APISignatureValidationAgent,
     CodeExampleValidationAgent,
     DocumentationClarityAgent,
+    APICompletenessAgent,
     ExtractionSummary,
 )
 
@@ -454,6 +455,35 @@ class DocumentationValidationPipeline:
 
         # 7. Flatten results from all workers
         all_results = [r for worker in worker_results for r in worker]
+
+        # 8. Run API Completeness Analysis (after all extractions complete)
+        console.print("\n[cyan]🔍 Analyzing API completeness...[/cyan]")
+        completeness_agent = APICompletenessAgent(
+            extraction_folder=self.run_context.results_dir / "extraction",
+            output_folder=self.run_context.results_dir / "api_completeness",
+            library_name=self.library_name,
+            library_version=self.library_version,
+            language="python",
+            validation_log_dir=self.run_context.run_dir / "validation_logs"
+        )
+
+        try:
+            completeness_result = await completeness_agent.analyze_completeness()
+
+            # Display summary
+            coverage_pct = completeness_result.coverage_summary.coverage_percentage
+            undocumented_count = len(completeness_result.undocumented_apis)
+            deprecated_count = len(completeness_result.deprecated_in_docs)
+
+            console.print(f"   Coverage: [cyan]{coverage_pct:.1f}%[/cyan] ({completeness_result.coverage_summary.documented}/{completeness_result.coverage_summary.total_apis} APIs)")
+            if undocumented_count > 0:
+                console.print(f"   Undocumented APIs: [yellow]{undocumented_count}[/yellow] (high priority)")
+            if deprecated_count > 0:
+                console.print(f"   Deprecated in docs: [red]{deprecated_count}[/red] (needs update)")
+
+        except Exception as e:
+            console.print(f"   [red]⚠️  API completeness analysis failed: {e}[/red]")
+            completeness_result = None
 
         overall_duration = (datetime.now() - overall_start).total_seconds()
 

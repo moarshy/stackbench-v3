@@ -15,7 +15,8 @@ from stackbench.schemas import (
     DocumentAnalysis,
     DocumentValidationResult,
     APISignatureValidationOutput,
-    ClarityValidationOutput
+    ClarityValidationOutput,
+    APICompletenessOutput
 )
 from stackbench.utils import validate_with_pydantic
 
@@ -847,3 +848,110 @@ def create_walkthrough_audit_validation_hook(output_dir: Optional[Path] = None, 
             return {}
 
     return walkthrough_audit_validation_hook
+
+
+def create_api_completeness_validation_hook(output_dir: Optional[Path] = None, log_dir: Optional[Path] = None):
+    """
+    Create a PreToolUse hook that validates API completeness analysis JSON output.
+
+    Args:
+        output_dir: Optional expected output directory for location validation
+        log_dir: Optional directory to log validation calls
+
+    Returns:
+        Async hook function
+    """
+    async def api_completeness_validation_hook(
+        input_data: Dict[str, Any],
+        tool_use_id: Optional[str],  # noqa: ARG001 - Required by hook signature
+        context: Any  # noqa: ARG001 - Required by hook signature
+    ) -> Dict[str, Any]:
+        """Validate API completeness JSON before writing."""
+        try:
+            tool_name = input_data.get('tool_name', '')
+            tool_input = input_data.get('tool_input', {})
+            file_path = tool_input.get('file_path', '')
+
+            # Only validate Write operations on completeness analysis files
+            if tool_name != 'Write':
+                return {}
+
+            filename = Path(file_path).name
+            if filename != 'completeness_analysis.json':
+                return {}
+
+            # Validate output directory if specified
+            if output_dir:
+                abs_file_path = Path(file_path).resolve()
+                abs_output_dir = output_dir.resolve()
+                file_dir = abs_file_path.parent
+
+                if not str(file_dir).startswith(str(abs_output_dir)):
+                    reason = f"Files must be created in {abs_output_dir}, not {file_dir}"
+
+                    # Log validation failure
+                    if log_dir:
+                        log_validation_call(log_dir, "api_completeness_validation", filename, False, reason=reason)
+
+                    return {
+                        'hookSpecificOutput': {
+                            'hookEventName': 'PreToolUse',
+                            'permissionDecision': 'deny',
+                            'permissionDecisionReason': reason
+                        }
+                    }
+
+            # Validate JSON content
+            content = tool_input.get('content', '')
+            if not content:
+                return {}
+
+            try:
+                data = json.loads(content)
+            except json.JSONDecodeError as e:
+                reason = f"Invalid JSON: {e}"
+
+                # Log validation failure
+                if log_dir:
+                    log_validation_call(log_dir, "api_completeness_validation", filename, False, reason=reason)
+
+                return {
+                    'hookSpecificOutput': {
+                        'hookEventName': 'PreToolUse',
+                        'permissionDecision': 'deny',
+                        'permissionDecisionReason': reason
+                    }
+                }
+
+            # Validate using Pydantic
+            passed, errors = validate_with_pydantic(data, APICompletenessOutput)
+
+            if not passed:
+                error_msg = f"Schema validation failed: {'; '.join(errors[:3]) if errors else 'Unknown error'}"
+
+                # Log validation failure
+                if log_dir:
+                    log_validation_call(log_dir, "api_completeness_validation", filename, False, errors=errors, reason="Schema validation failed")
+
+                return {
+                    'hookSpecificOutput': {
+                        'hookEventName': 'PreToolUse',
+                        'permissionDecision': 'deny',
+                        'permissionDecisionReason': error_msg
+                    }
+                }
+
+            # Validation passed - log success
+            if log_dir:
+                log_validation_call(log_dir, "api_completeness_validation", filename, True)
+
+            return {}  # Validation passed
+
+        except Exception as e:
+            # Log error but don't block
+            print(f"⚠️  Validation hook error: {e}")
+            if log_dir:
+                log_validation_call(log_dir, "api_completeness_validation", filename or "unknown", False, reason=f"Hook error: {e}")
+            return {}
+
+    return api_completeness_validation_hook

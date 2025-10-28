@@ -12,7 +12,8 @@ from claude_agent_sdk import HookMatcher
 from .logging import create_logging_hooks, AgentLogger
 from .validation import (
     create_extraction_validation_hook,
-    create_validation_output_hook
+    create_validation_output_hook,
+    create_api_completeness_validation_hook
 )
 
 
@@ -67,6 +68,18 @@ class HookManager:
 
         elif self.agent_type in ["api_validation", "code_validation", "clarity_validation"]:
             validation_hook = create_validation_output_hook(
+                output_dir=self.output_dir,
+                log_dir=self.validation_log_dir
+            )
+            hooks['PreToolUse'].append(
+                HookMatcher(
+                    matcher="Write",  # Only validate Write operations
+                    hooks=[validation_hook]
+                )
+            )
+
+        elif self.agent_type == "api_completeness":
+            validation_hook = create_api_completeness_validation_hook(
                 output_dir=self.output_dir,
                 log_dir=self.validation_log_dir
             )

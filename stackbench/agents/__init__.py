@@ -18,6 +18,10 @@ from .clarity_agent import (
     ClarityValidationSummary,
 )
 
+from .api_completeness_agent import (
+    APICompletenessAgent,
+)
+
 # Import schemas from central location for backward compatibility
 from stackbench.schemas import (
     SnippetSource,
@@ -36,6 +40,10 @@ from stackbench.schemas import (
     BrokenLink,
     MissingAltText,
     CodeBlockIssue,
+    APICompletenessOutput,
+    CoverageSummary,
+    UndocumentedAPI,
+    DeprecatedInDocs,
 )
 
 __all__ = [
@@ -65,4 +73,10 @@ __all__ = [
     "MissingAltText",
     "CodeBlockIssue",
     "ClarityValidationSummary",
+    # API Completeness & Deprecation
+    "APICompletenessAgent",
+    "APICompletenessOutput",
+    "CoverageSummary",
+    "UndocumentedAPI",
+    "DeprecatedInDocs",
 ]
