@@ -51,7 +51,7 @@ This agent catches **missing documentation** and **deprecated API usage** - ensu
 ### Agent Responsibilities (Environment Interaction + Qualitative)
 - **Library Installation**: `pip install` via Bash in agent's environment
 - **Introspection Execution**: Run language-specific templates via Bash
-  - Python: `stackbench/mcp_servers/introspection_templates/python_introspect.py`
+  - Python: `stackbench/introspection_templates/python_introspect.py`
   - JavaScript/TypeScript: (Future: `js_introspect.js`, `ts_introspect.ts`)
 - **Read Introspection Results**: Parse standardized JSON output from templates
 - **Read Extraction Files**: Load all `*_analysis.json` files
@@ -69,7 +69,7 @@ This agent catches **missing documentation** and **deprecated API usage** - ensu
 ### Introspection Templates (Language-Specific Scripts)
 Language-specific scripts that output standardized JSON format:
 
-**Location**: `stackbench/mcp_servers/introspection_templates/`
+**Location**: `stackbench/introspection_templates/`
 
 **Python Template** (`python_introspect.py`):
 ```bash
@@ -772,38 +772,70 @@ validation_log_dir/api_completeness_logs/
 
 ## Implementation Notes
 
-### Why MCP Server?
+### Why This Architecture?
+
+**First Principles Design Decision:**
 
 ```python
-# Alternative: Agent does introspection via Bash
-# ❌ Problems:
-# - Non-deterministic (LLM parsing)
-# - Complex bash commands in prompts
-# - Error-prone introspection logic
+# PROBLEM: Original MCP approach (introspection in MCP subprocess)
+# ❌ MCP server runs as subprocess
+# ❌ Subprocess can't access packages installed in parent environment
+# ❌ Even with sys.executable, package isolation persists
+# ❌ Complex workarounds (venv in subprocess, etc.) are fragile
 
-# MCP Server approach:
-# ✅ Deterministic calculations
-# ✅ Clean separation of concerns
-# ✅ Reusable introspection logic
-# ✅ Easy to test and debug
+# SOLUTION: Bash-based introspection + MCP for computation
+# ✅ Agent installs library in its own environment
+# ✅ Agent runs introspection templates via Bash (same environment)
+# ✅ Templates output standardized JSON (deterministic format)
+# ✅ MCP handles only pure computational tasks (scoring, metrics)
+# ✅ Clean separation: Environment interaction (Bash) vs Computation (MCP)
+```
+
+**Template-Based Introspection:**
+```python
+# Instead of MCP subprocess calling inspect module...
+# Agent runs language-specific templates via Bash:
+
+# Python:
+python stackbench/introspection_templates/python_introspect.py lancedb 0.25.2 > result.json
+
+# JavaScript (future):
+node stackbench/introspection_templates/js_introspect.js axios 1.6.0 > result.json
+
+# Standardized JSON output:
+{
+  "library": "lancedb",
+  "total_apis": 118,
+  "apis": [...],
+  "by_type": {...},
+  "deprecated_count": 3
+}
 ```
 
 ### Agent vs MCP Division
 
 ```python
-# MCP (Deterministic):
-# - pip install
-# - inspect module operations
-# - Score calculations
-# - Metric formulas
-# - Ranking algorithms
-
-# Agent (Qualitative):
-# - Reading markdown/JSON
+# Agent (Environment Interaction + Qualitative):
+# - pip install (Bash)
+# - Run introspection templates (Bash)
+# - Read JSON output
+# - Read markdown/JSON extraction files
 # - Pattern matching in text
 # - Understanding doc structure
 # - Orchestrating workflow
 # - Building final output
+
+# MCP (Pure Computation):
+# - Importance score calculations
+# - Coverage tier classification
+# - Metric formulas (percentages)
+# - Ranking algorithms (prioritization)
+
+# Introspection Templates (Language-Specific):
+# - Python: inspect module, __all__, docstrings
+# - JavaScript (future): AST parsing, exports
+# - TypeScript (future): type declarations
+# - Output: Standardized JSON
 ```
 
 ## Related Documentation

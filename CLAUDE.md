@@ -431,9 +431,10 @@ INPUT: GitHub Repository
    Extract Agent → data/<run_id>/results/extraction/<doc>_analysis.json
     ↓
 4. API Completeness Agent (after all extractions complete):
-   • Uses MCP server for deterministic library introspection
+   • Installs library via pip (Bash in agent's environment)
+   • Runs introspection template via Bash (stackbench/introspection_templates/python_introspect.py)
    • Reads ALL extraction files to aggregate documented APIs
-   • Calculates coverage metrics and importance scores
+   • Uses MCP server for importance scoring and metrics calculations
    → data/<run_id>/results/api_completeness/completeness_analysis.json
     ↓
 5. For each extraction file (sequential):
@@ -643,13 +644,15 @@ stackbench-v3/
 ├── stackbench/           # Python package
 │   ├── agents/          # Core validation agents
 │   │   ├── extraction_agent.py
-│   │   ├── api_completeness_agent.py        # NEW: Coverage & deprecation (with MCP)
+│   │   ├── api_completeness_agent.py        # Coverage & deprecation (uses Bash + MCP)
 │   │   ├── api_validation_agent.py
 │   │   ├── code_validation_agent.py
 │   │   └── clarity_agent.py
+│   ├── introspection_templates/  # Language-specific introspection scripts ✨
+│   │   └── python_introspect.py              # Python API discovery (inspect module)
 │   ├── mcp_servers/     # MCP servers for deterministic operations ✨
 │   │   ├── __init__.py
-│   │   ├── api_completeness_server.py       # NEW: Library introspection & scoring
+│   │   ├── api_completeness_server.py       # Importance scoring & metrics (no introspection)
 │   │   └── clarity_scoring_server.py        # Deterministic clarity scoring
 │   ├── walkthroughs/    # Walkthrough validation system ✨
 │   │   ├── __init__.py
