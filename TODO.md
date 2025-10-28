@@ -135,19 +135,31 @@
 
 ---
 
-## Priority 5: Advanced Features 📋 PLANNED
+## Priority 5: Advanced Features 🚧 IN PROGRESS
 
-### 16. Deprecated API Detection Agent 📋
-- [ ] Detect `@deprecated` decorators in source code
-- [ ] Flag documentation still using deprecated APIs
-- [ ] Suggest migration to new APIs
-- [ ] Track deprecation warnings
+### 16-17. API Completeness & Deprecation Agent 🚧 (Combined)
+**Status:** Implemented, needs testing
+- [x] Discover all public APIs via library introspection (inspect module)
+- [x] Detect deprecated APIs (@deprecated decorators, DeprecationWarning patterns)
+- [x] Aggregate documentation coverage across all pages
+- [x] Calculate tiered coverage (mentioned, has example, dedicated section)
+- [x] Identify undocumented APIs ranked by importance
+- [x] Flag documentation still using deprecated APIs
+- [x] Suggest migration to new APIs
+- [x] Coverage percentage metrics
+- [x] Integration into main pipeline (runs after extraction)
+- [x] Pydantic schemas for output validation
+- [x] Validation hooks for JSON quality
+- [ ] End-to-end testing on real library (e.g., LanceDB)
+- [ ] Refinement of importance scoring heuristics
+- [ ] CLI output formatting and summary display
 
-### 17. Missing Coverage Agent 📋
-- [ ] Find public APIs in codebase
-- [ ] Cross-reference with documentation
-- [ ] Report undocumented APIs
-- [ ] Coverage percentage metrics
+**Implementation Details:**
+- Takes entire doc folder as input (not individual docs)
+- Runs after all extraction complete
+- Combines deprecation detection + coverage analysis in single agent
+- Uses pip install + introspection (like API validation agent)
+- Outputs to `results/api_completeness/completeness_analysis.json`
 
 ### 18. Real-World Integration Gaps Agent 📋
 - [ ] Detect missing error handling in examples
