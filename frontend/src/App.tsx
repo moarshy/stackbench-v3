@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { FileText, CheckCircle2, Search, Settings as SettingsIcon, ChevronLeft, ChevronRight, Code, Play, BookOpen, Route } from 'lucide-react';
+import { FileText, CheckCircle2, Search, Settings as SettingsIcon, ChevronLeft, ChevronRight, Code, Play, BookOpen, Route, PieChart } from 'lucide-react';
 import type {
   ExtractionOutput,
   ValidationOutput,
@@ -7,7 +7,8 @@ import type {
   CCCodeExampleValidationOutput,
   CCClarityValidationOutput,
   RunInfo as RunInfoType,
-  WalkthroughData
+  WalkthroughData,
+  APICompletenessOutput
 } from './types';
 import { apiService, configInitialized } from './services/api';
 import { Settings } from './components/Settings';
@@ -38,7 +39,8 @@ function App() {
   const [activeTab, setActiveTab] = useState('extraction');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [docPaneCollapsed, setDocPaneCollapsed] = useState(false);
-  const [viewMode, setViewMode] = useState<'documents' | 'walkthroughs'>('documents');
+  const [viewMode, setViewMode] = useState<'documents' | 'walkthroughs' | 'api-coverage'>('documents');
+  const [apiCompleteness, setApiCompleteness] = useState<APICompletenessOutput | null>(null);
 
   // Wait for config to be initialized from backend
   useEffect(() => {
@@ -87,6 +89,7 @@ function App() {
       apiService.setRunId(selectedRun.run_id);
       loadDocs();
       loadWalkthroughs();
+      loadAPICompleteness();
       // Reset selected doc when run changes
       setSelectedDoc(null);
       setSelectedWalkthrough(null);
@@ -151,6 +154,16 @@ function App() {
       }
     } catch (error) {
       console.error('Failed to load walkthroughs:', error);
+    }
+  };
+
+  const loadAPICompleteness = async () => {
+    try {
+      const data = await apiService.getAPICompleteness();
+      setApiCompleteness(data);
+    } catch (error) {
+      console.error('Failed to load API completeness:', error);
+      setApiCompleteness(null);
     }
   };
 
@@ -294,7 +307,9 @@ function App() {
                 <p className="text-sm text-muted-foreground">
                   {viewMode === 'documents'
                     ? 'View documentation, extraction results, and validation'
-                    : 'View walkthrough tutorials and audit results'}
+                    : viewMode === 'walkthroughs'
+                    ? 'View walkthrough tutorials and audit results'
+                    : 'View API coverage analysis and completeness metrics'}
                 </p>
               </div>
 
@@ -324,6 +339,22 @@ function App() {
                   {walkthroughs.length > 0 && (
                     <span className="px-1.5 py-0.5 rounded-full bg-primary text-primary-foreground text-xs">
                       {walkthroughs.length}
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => setViewMode('api-coverage')}
+                  className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${
+                    viewMode === 'api-coverage'
+                      ? 'bg-background shadow-sm text-foreground'
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  <PieChart className="h-4 w-4" />
+                  API Coverage
+                  {apiCompleteness && (
+                    <span className="px-1.5 py-0.5 rounded-full bg-primary text-primary-foreground text-xs">
+                      {apiCompleteness.coverage_summary.coverage_percentage.toFixed(0)}%
                     </span>
                   )}
                 </button>
@@ -444,6 +475,179 @@ function App() {
                       </div>
                     </div>
                   )}
+                </div>
+              </div>
+            )}
+          </div>
+        ) : viewMode === 'api-coverage' ? (
+          /* API COVERAGE MODE */
+          <div className="flex-1 overflow-auto p-6">
+            {!apiCompleteness ? (
+              <div className="flex items-center justify-center h-full">
+                <div className="text-center">
+                  <PieChart className="h-16 w-16 mx-auto text-muted-foreground mb-4 opacity-50" />
+                  <h3 className="text-xl font-semibold mb-2">No API Coverage Data</h3>
+                  <p className="text-sm text-muted-foreground">
+                    API completeness analysis not available for this run
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="max-w-7xl mx-auto space-y-6">
+                {/* Header */}
+                <div>
+                  <h2 className="text-2xl font-bold mb-2">API Coverage Analysis</h2>
+                  <p className="text-muted-foreground">
+                    {apiCompleteness.library} v{apiCompleteness.version} • Analyzed {new Date(apiCompleteness.analyzed_at).toLocaleString()}
+                  </p>
+                </div>
+
+                {/* Coverage Summary Cards */}
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div className="p-4 border border-border rounded-lg bg-card">
+                    <div className="text-sm text-muted-foreground mb-1">Coverage</div>
+                    <div className={`text-3xl font-bold ${
+                      apiCompleteness.coverage_summary.coverage_percentage >= 80 ? 'text-green-600' :
+                      apiCompleteness.coverage_summary.coverage_percentage >= 50 ? 'text-yellow-600' :
+                      'text-red-600'
+                    }`}>
+                      {apiCompleteness.coverage_summary.coverage_percentage.toFixed(1)}%
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      {apiCompleteness.coverage_summary.documented}/{apiCompleteness.coverage_summary.total_apis} APIs
+                    </div>
+                  </div>
+
+                  <div className="p-4 border border-border rounded-lg bg-card">
+                    <div className="text-sm text-muted-foreground mb-1">With Examples</div>
+                    <div className="text-3xl font-bold text-blue-600">
+                      {apiCompleteness.coverage_summary.with_examples}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      {apiCompleteness.coverage_summary.example_coverage_percentage.toFixed(1)}% have code examples
+                    </div>
+                  </div>
+
+                  <div className="p-4 border border-border rounded-lg bg-card">
+                    <div className="text-sm text-muted-foreground mb-1">Complete Docs</div>
+                    <div className="text-3xl font-bold text-purple-600">
+                      {apiCompleteness.coverage_summary.with_dedicated_sections}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      {apiCompleteness.coverage_summary.complete_coverage_percentage.toFixed(1)}% with dedicated sections
+                    </div>
+                  </div>
+
+                  <div className="p-4 border border-border rounded-lg bg-card">
+                    <div className="text-sm text-muted-foreground mb-1">Undocumented</div>
+                    <div className="text-3xl font-bold text-orange-600">
+                      {apiCompleteness.coverage_summary.undocumented}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      {apiCompleteness.undocumented_apis.filter(api => api.importance === 'high').length} high priority
+                    </div>
+                  </div>
+                </div>
+
+                {/* Deprecated APIs Warning */}
+                {apiCompleteness.deprecated_in_docs.length > 0 && (
+                  <div className="p-4 border border-red-200 dark:border-red-900 rounded-lg bg-red-50 dark:bg-red-950">
+                    <h3 className="text-lg font-semibold text-red-900 dark:text-red-100 mb-2">
+                      ⚠️ Deprecated APIs in Documentation
+                    </h3>
+                    <p className="text-sm text-red-800 dark:text-red-200 mb-3">
+                      Found {apiCompleteness.deprecated_in_docs.length} deprecated API(s) still being taught in docs
+                    </p>
+                    <div className="space-y-2">
+                      {apiCompleteness.deprecated_in_docs.map((dep, idx) => (
+                        <div key={idx} className="p-3 bg-white dark:bg-gray-900 rounded border border-red-200 dark:border-red-800">
+                          <code className="text-sm font-mono">{dep.api}</code>
+                          <p className="text-xs text-muted-foreground mt-1">{dep.suggestion}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Undocumented APIs Table */}
+                {apiCompleteness.undocumented_apis.length > 0 && (
+                  <div className="border border-border rounded-lg overflow-hidden">
+                    <div className="p-4 bg-muted border-b border-border">
+                      <h3 className="text-lg font-semibold">High Priority Undocumented APIs</h3>
+                      <p className="text-sm text-muted-foreground">
+                        APIs that should be documented based on importance scoring
+                      </p>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full">
+                        <thead className="bg-muted">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">API</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">Module</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">Type</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">Priority</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">Score</th>
+                            <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">Reason</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border">
+                          {apiCompleteness.undocumented_apis
+                            .filter(api => api.importance === 'high')
+                            .sort((a, b) => b.importance_score - a.importance_score)
+                            .slice(0, 20)
+                            .map((api, idx) => (
+                            <tr key={idx} className="hover:bg-muted/50">
+                              <td className="px-4 py-3 text-sm font-mono">{api.api}</td>
+                              <td className="px-4 py-3 text-sm text-muted-foreground">{api.module}</td>
+                              <td className="px-4 py-3 text-sm">
+                                <span className="px-2 py-1 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs">
+                                  {api.type}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-sm">
+                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                  api.importance === 'high' ? 'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200' :
+                                  api.importance === 'medium' ? 'bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200' :
+                                  'bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200'
+                                }`}>
+                                  {api.importance}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-sm font-semibold">{api.importance_score}/10</td>
+                              <td className="px-4 py-3 text-sm text-muted-foreground max-w-md truncate">{api.reason}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* API Surface Breakdown */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="border border-border rounded-lg p-4">
+                    <h3 className="text-lg font-semibold mb-3">By Type</h3>
+                    <div className="space-y-2">
+                      {Object.entries(apiCompleteness.api_surface.by_type).map(([type, count]) => (
+                        <div key={type} className="flex items-center justify-between">
+                          <span className="text-sm capitalize">{type}</span>
+                          <span className="text-sm font-semibold">{count}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="border border-border rounded-lg p-4">
+                    <h3 className="text-lg font-semibold mb-3">By Module</h3>
+                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                      {Object.entries(apiCompleteness.api_surface.by_module).map(([module, apis]) => (
+                        <div key={module} className="flex items-center justify-between">
+                          <span className="text-sm font-mono truncate">{module}</span>
+                          <span className="text-sm font-semibold">{apis.length}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
