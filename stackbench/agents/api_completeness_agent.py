@@ -392,7 +392,7 @@ class APICompletenessAgent:
         warnings_list = []
 
         # Create logger
-        from stackbench.hooks import create_agent_hooks, AgentLogger
+        from stackbench.hooks import create_agent_hooks, create_logging_hooks, AgentLogger
 
         messages_log_file = None
         if self.validation_log_dir:
@@ -403,22 +403,38 @@ class APICompletenessAgent:
             tools_log = completeness_logs_dir / "tools.jsonl"
             messages_log_file = completeness_logs_dir / "messages.jsonl"
             logger = AgentLogger(agent_log, tools_log)
+
+            # Create MCP-specific logging directory
+            mcp_log_dir = completeness_logs_dir / "mcp"
+            mcp_log_dir.mkdir(parents=True, exist_ok=True)
+
+            mcp_logger = AgentLogger(
+                log_file=mcp_log_dir / "mcp_agent.log",
+                tools_log_file=mcp_log_dir / "mcp_tools.jsonl"
+            )
+            mcp_logging_hooks = create_logging_hooks(mcp_logger)
         else:
             logger = None
+            mcp_logging_hooks = {'PreToolUse': [], 'PostToolUse': []}
 
-        # Create hooks
-        hooks = create_agent_hooks(
+        # Create hooks (combine validation + MCP logging)
+        validation_hooks = create_agent_hooks(
             agent_type="api_completeness",
             logger=logger,
             output_dir=self.output_folder,
             validation_log_dir=self.validation_log_dir
         )
 
+        # Merge validation hooks with MCP logging hooks
+        hooks = {
+            'PreToolUse': validation_hooks['PreToolUse'] + mcp_logging_hooks['PreToolUse'],
+            'PostToolUse': validation_hooks['PostToolUse'] + mcp_logging_hooks['PostToolUse']
+        }
+
         # Create options with MCP server
         options = ClaudeAgentOptions(
             system_prompt=COMPLETENESS_SYSTEM_PROMPT,
-            allowed_tools=["Read", "Write"],
-            permission_mode="acceptEdits",
+            permission_mode="bypassPermissions",
             hooks=hooks,
             cwd=str(Path.cwd()),
             mcp_servers={

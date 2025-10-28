@@ -8,7 +8,8 @@ import type {
   DSpyCodeExampleValidationOutput,
   WalkthroughData,
   WalkthroughExport,
-  WalkthroughSession
+  WalkthroughSession,
+  APICompletenessOutput
 } from '../types';
 
 interface RepoConfig {
@@ -356,6 +357,29 @@ export class APIService {
       };
     } catch (error) {
       console.error('Error fetching walkthrough data:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get API completeness analysis (run-level, not per-document)
+   */
+  async getAPICompleteness(): Promise<APICompletenessOutput | null> {
+    if (!this.currentRunId) {
+      return null;
+    }
+
+    try {
+      const completenessPath = this.getRunPath('results/api_completeness/completeness_analysis.json');
+      const response = await fetch(`/api/file?path=${encodeURIComponent(completenessPath)}`);
+
+      if (!response.ok) {
+        return null;
+      }
+
+      return await response.json();
+    } catch (error) {
+      console.error('Error fetching API completeness data:', error);
       return null;
     }
   }

@@ -491,3 +491,82 @@ export interface RunInfo {
   display_name: string; // Formatted for display
   created_date: Date;
 }
+
+// ============================================================================
+// API Completeness Types
+// ============================================================================
+
+export interface APISurfaceSummary {
+  total_public_apis: number;
+  by_module: Record<string, string[]>;
+  by_type: Record<string, number>;
+  deprecated_count: number;
+}
+
+export interface CoverageSummary {
+  documented: number;
+  with_examples: number;
+  with_dedicated_sections: number;
+  undocumented: number;
+  total_apis: number;
+  coverage_percentage: number;
+  example_coverage_percentage: number;
+  complete_coverage_percentage: number;
+}
+
+export interface UndocumentedAPI {
+  api: string;
+  module: string;
+  type: string;
+  importance: 'high' | 'medium' | 'low';
+  importance_score: number;
+  reason: string;
+  has_docstring: boolean;
+  is_async: boolean;
+}
+
+export interface DeprecatedInDocs {
+  api: string;
+  module: string;
+  deprecated_since: string | null;
+  alternative: string | null;
+  documented_in: string[];
+  severity: 'critical' | 'warning' | 'info';
+  deprecation_message: string | null;
+  suggestion: string;
+}
+
+export interface APIDetail {
+  api: string;
+  module: string;
+  type: string;
+  is_deprecated: boolean;
+  coverage_tier: number;
+  documented_in: string[];
+  has_examples: boolean;
+  has_dedicated_section: boolean;
+  importance: 'high' | 'medium' | 'low';
+  importance_score: number;
+}
+
+export interface EnvironmentInfo {
+  python_version: string;
+  platform: string;
+  venv_path: string;
+}
+
+export interface APICompletenessOutput {
+  analysis_id: string;
+  analyzed_at: string;
+  library: string;
+  version: string;
+  language: string;
+  api_surface: APISurfaceSummary;
+  coverage_summary: CoverageSummary;
+  undocumented_apis: UndocumentedAPI[];
+  deprecated_in_docs: DeprecatedInDocs[];
+  api_details: APIDetail[];
+  environment: EnvironmentInfo;
+  processing_time_ms: number;
+  warnings: string[];
+}
