@@ -157,7 +157,27 @@ output_folder/
       "type": "function",
       "is_deprecated": false,
       "coverage_tier": 3,
-      "documented_in": ["quickstart.md", "api-reference.md"],
+      "documentation_references": [
+        {
+          "document": "pandas_and_pyarrow.md",
+          "section_hierarchy": ["Pandas and PyArrow", "Create dataset"],
+          "markdown_anchor": "#create-dataset",
+          "line_number": 50,
+          "context_type": "signature",
+          "code_block_index": 0,
+          "raw_context": "Create dataset - connecting to LanceDB database"
+        },
+        {
+          "document": "duckdb.md",
+          "section_hierarchy": ["DuckDB Integration", "Setup"],
+          "markdown_anchor": "#setup",
+          "line_number": 15,
+          "context_type": "example",
+          "code_block_index": 1,
+          "raw_context": "Example: Basic connection"
+        }
+      ],
+      "documented_in": ["pandas_and_pyarrow.md", "duckdb.md"],
       "has_examples": true,
       "has_dedicated_section": true,
       "importance": "high",
@@ -177,6 +197,38 @@ output_folder/
   "warnings": []
 }
 ```
+
+### Rich Documentation References
+
+**New Feature**: Each API in `api_details` now includes a `documentation_references` array with granular location data:
+
+```json
+{
+  "documentation_references": [
+    {
+      "document": "pandas_and_pyarrow.md",         // Document filename
+      "section_hierarchy": ["Pandas", "Create"],    // Breadcrumb path
+      "markdown_anchor": "#create-dataset",         // Section anchor
+      "line_number": 50,                            // Exact line
+      "context_type": "signature",                  // signature | example | mention
+      "code_block_index": 0,                        // Which code block
+      "raw_context": "Create dataset - connecting"  // Human-readable context
+    }
+  ]
+}
+```
+
+**Benefits:**
+- **Granular Traceability**: Know exactly where each API is documented (file, line, section)
+- **Context Type Tracking**: Distinguish between signatures, examples, and mentions
+- **Actionable Suggestions**: "API X should be added to section Y at line Z"
+- **Frontend Navigation**: Click reference → Jump to exact doc location
+- **Coverage Heatmap**: Visualize which docs cover which APIs
+
+**Backward Compatibility:**
+- `documented_in` remains as derived field (unique list of documents)
+- Existing dashboards work unchanged
+- New features leverage rich references
 
 ## Pseudocode
 

@@ -536,12 +536,27 @@ export interface DeprecatedInDocs {
   suggestion: string;
 }
 
+export interface DocumentationReference {
+  document: string;
+  section_hierarchy: string[];
+  markdown_anchor: string | null;
+  line_number: number;
+  context_type: 'signature' | 'example' | 'mention';
+  code_block_index: number | null;
+  raw_context: string;
+}
+
 export interface APIDetail {
   api: string;
   module: string;
   type: string;
   is_deprecated: boolean;
   coverage_tier: number;
+
+  // Rich documentation references
+  documentation_references: DocumentationReference[];
+
+  // Backward compatible (derived from documentation_references)
   documented_in: string[];
   has_examples: boolean;
   has_dedicated_section: boolean;

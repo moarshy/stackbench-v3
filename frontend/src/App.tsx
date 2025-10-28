@@ -17,6 +17,7 @@ import { Tabs, TabPanel } from './components/Tabs';
 import { RunSelector } from './components/RunSelector';
 import { RunInfo } from './components/RunInfo';
 import { WalkthroughViewer } from './components/WalkthroughViewer';
+import { APICoverageViewer } from './components/APICoverageViewer';
 
 function App() {
   const [configReady, setConfigReady] = useState(false);
@@ -570,106 +571,21 @@ function App() {
                   </div>
                 )}
 
-                {/* Undocumented APIs Table */}
-                {apiCompleteness.undocumented_apis.length > 0 && (
-                  <div className="border border-border rounded-lg overflow-hidden">
-                    <div className="p-4 bg-muted border-b border-border">
-                      <h3 className="text-lg font-semibold">
-                        {showAllUndocumented ? 'All Undocumented APIs' : 'High Priority Undocumented APIs'}
-                      </h3>
-                      <p className="text-sm text-muted-foreground">
-                        {showAllUndocumented
-                          ? `Showing all ${apiCompleteness.undocumented_apis.length} undocumented APIs`
-                          : 'APIs that should be documented based on importance scoring'
-                        }
-                      </p>
-                    </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full">
-                        <thead className="bg-muted">
-                          <tr>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">API</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">Module</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">Type</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">Priority</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">Score</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">Reason</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-border">
-                          {(showAllUndocumented
-                            ? apiCompleteness.undocumented_apis
-                            : apiCompleteness.undocumented_apis.filter(api => api.importance === 'high')
-                          )
-                            .sort((a, b) => b.importance_score - a.importance_score)
-                            .map((api, idx) => (
-                            <tr key={idx} className="hover:bg-muted/50">
-                              <td className="px-4 py-3 text-sm font-mono">{api.api}</td>
-                              <td className="px-4 py-3 text-sm text-muted-foreground">{api.module}</td>
-                              <td className="px-4 py-3 text-sm">
-                                <span className="px-2 py-1 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs">
-                                  {api.type}
-                                </span>
-                              </td>
-                              <td className="px-4 py-3 text-sm">
-                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                  api.importance === 'high' ? 'bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200' :
-                                  api.importance === 'medium' ? 'bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200' :
-                                  'bg-gray-100 dark:bg-gray-800 text-gray-800 dark:text-gray-200'
-                                }`}>
-                                  {api.importance}
-                                </span>
-                              </td>
-                              <td className="px-4 py-3 text-sm font-semibold">{api.importance_score}/10</td>
-                              <td className="px-4 py-3 text-sm text-muted-foreground max-w-md truncate">{api.reason}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                    {/* Show More/Less Button */}
-                    {apiCompleteness.undocumented_apis.length > apiCompleteness.undocumented_apis.filter(api => api.importance === 'high').length && (
-                      <div className="p-4 bg-muted border-t border-border flex justify-center">
-                        <button
-                          onClick={() => setShowAllUndocumented(!showAllUndocumented)}
-                          className="px-4 py-2 text-sm font-medium text-primary hover:text-primary/80 transition-colors"
-                        >
-                          {showAllUndocumented
-                            ? `Show Less (${apiCompleteness.undocumented_apis.filter(api => api.importance === 'high').length} high priority only)`
-                            : `Show All (${apiCompleteness.undocumented_apis.length - apiCompleteness.undocumented_apis.filter(api => api.importance === 'high').length} more)`
-                          }
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* API Surface Breakdown */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="border border-border rounded-lg p-4">
-                    <h3 className="text-lg font-semibold mb-3">By Type</h3>
-                    <div className="space-y-2">
-                      {Object.entries(apiCompleteness.api_surface.by_type).map(([type, count]) => (
-                        <div key={type} className="flex items-center justify-between">
-                          <span className="text-sm capitalize">{type}</span>
-                          <span className="text-sm font-semibold">{count}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="border border-border rounded-lg p-4">
-                    <h3 className="text-lg font-semibold mb-3">By Module</h3>
-                    <div className="space-y-2 max-h-64 overflow-y-auto">
-                      {Object.entries(apiCompleteness.api_surface.by_module).map(([module, apis]) => (
-                        <div key={module} className="flex items-center justify-between">
-                          <span className="text-sm font-mono truncate">{module}</span>
-                          <span className="text-sm font-semibold">{apis.length}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
+                {/* Enhanced API Coverage Viewer */}
+                <APICoverageViewer
+                  apiCompleteness={apiCompleteness}
+                  onNavigateToDoc={(docName, lineNumber, anchor) => {
+                    // Switch to documents mode
+                    setViewMode('documents');
+                    // Select the document
+                    setSelectedDoc(docName);
+                    // Scroll to line after a brief delay to allow document to load
+                    setTimeout(() => {
+                      // Implementation would scroll to line/anchor in the MarkdownViewer
+                      // For now, just switching docs is a good start
+                    }, 200);
+                  }}
+                />
               </div>
             )}
           </div>
