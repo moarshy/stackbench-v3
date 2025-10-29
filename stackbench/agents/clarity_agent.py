@@ -35,9 +35,9 @@ from stackbench.schemas import (
     ScoreExplanation
 )
 
-# Import helper functions
-from stackbench.agents.clarity_helpers import get_content_metrics_from_validation
-from stackbench.hooks.logging import AgentLogger, create_logging_hooks
+# Note: get_content_metrics_from_validation no longer needed - agent calls MCP tools directly
+# from stackbench.agents.clarity_helpers import get_content_metrics_from_validation
+# AgentLogger and create_logging_hooks no longer needed for separate MCP calls
 
 console = Console()
 
@@ -141,9 +141,12 @@ SEVERITY LEVELS:
 CODE BLOCK FORMATTING - DO NOT FLAG RENDERING ARTIFACTS:
 - **IGNORE INDENTATION ENTIRELY**: Code blocks are extracted from test files and normalized. Indentation is a rendering artifact, not a documentation issue
 - **DO NOT** flag: "inconsistent indentation", "extra spaces", "wrong indentation", "should be at module level", etc.
-- **ONLY flag indentation** if it would cause actual Python SyntaxError or IndentationError when executed
-- **Focus on CONTENT**: undefined variables, missing imports, wrong APIs, logical errors
+- **ONLY flag indentation** if it would cause actual syntax errors when executed (Python: IndentationError, JS/TS: block scope issues)
+- **Focus on CONTENT**: undefined variables, missing imports/requires, wrong APIs, logical errors
 - **Ignore formatting**: whitespace, blank lines, indentation style are all rendering artifacts from the build system
+- **Language-specific considerations**:
+  - Python: imports, async/await, type hints
+  - JavaScript/TypeScript: require/import, promises/async, JSDoc annotations
 
 VARIABLE SCOPE ANALYSIS:
 - Before flagging "undefined variable", check if it's defined ANYWHERE in the document (not just current section)
@@ -153,7 +156,20 @@ VARIABLE SCOPE ANALYSIS:
   * Message: "Variable 'X' used here was defined in section 'Y' above. Consider adding a note for users who jump directly to this section."
 - Only use "undefined_variable" with "critical" severity if the variable is truly missing from the entire document
 
-IMPORTANT: Your job is to FIND and DESCRIBE issues, not to calculate scores. A separate scoring system will use your findings to calculate deterministic quality scores."""
+**Available MCP Tools for Scoring:**
+After finding issues, you have access to these MCP tools for deterministic scoring:
+- `calculate_clarity_score(issues, metrics)` - Returns overall score, tier, and dimension scores
+- `get_improvement_roadmap(issues, metrics, current_score)` - Returns prioritized fix list with impact/effort
+- `explain_score(score, breakdown, issues, metrics)` - Returns human-readable explanation
+
+**Your Workflow:**
+1. Analyze documentation and identify issues (clarity, structural, technical)
+2. Call `calculate_clarity_score` to get scores
+3. Call `get_improvement_roadmap` to prioritize fixes
+4. Call `explain_score` to generate explanation
+5. Return complete JSON with all results
+
+Focus on finding issues accurately - the MCP tools will handle scoring deterministically."""
 
 
 def create_clarity_validation_prompt(
@@ -288,9 +304,10 @@ This markdown may contain build-time directives that reference external files. T
 - Provide ACTIONABLE suggestions: Tell exactly how to fix each issue
 - Check ALL links: Use Read tool to verify internal links, check external URLs
 - Validate images: Check for missing alt text
-- Check code blocks: Ensure all have language specification (```python, not just ```)
+- Check code blocks: Ensure all have language specification (```python, ```javascript, ```typescript, ```js, ```ts, ```bash, not just ```)
 - Consider validation results: Correlate clarity issues with validation failures when relevant
 - Categorize each issue by dimension: instruction_clarity, logical_flow, completeness, consistency, or prerequisite_coverage
+- Language-aware evaluation: For {language} documentation, verify appropriate syntax patterns (imports/requires, async patterns, etc.)
 
 **OUTPUT FORMAT - Respond with ONLY this JSON structure:**
 
@@ -304,9 +321,9 @@ This markdown may contain build-time directives that reference external files. T
       "section": "Configuration",
       "step_number": 3,
       "message": "Step 3 references 'config.yaml' but this file was never created or explained in prior steps",
-      "suggested_fix": "Add Step 2b: Create config.yaml with example content showing required fields (host, port, database_name)",
-      "affected_code": "config = lancedb.Config.from_file('config.yaml')",
-      "context_quote": "Now load your configuration: config = lancedb.Config.from_file('config.yaml')"
+      "suggested_fix": "Add Step 2b: Create config.yaml with example content showing required fields",
+      "affected_code": "config = Config.from_file('config.yaml')",
+      "context_quote": "Now load your configuration: config = Config.from_file('config.yaml')"
     }},
     {{
       "type": "cross_section_variable_reference",
@@ -326,7 +343,7 @@ This markdown may contain build-time directives that reference external files. T
       "severity": "warning",
       "location": "Prerequisites mentioned throughout tutorial (lines 87, 102, 156) instead of upfront",
       "message": "Prerequisites are scattered throughout the document rather than consolidated at the beginning",
-      "suggested_fix": "Create a 'Prerequisites' section at the top listing all requirements: Python 3.8+, Docker, pip, Git"
+      "suggested_fix": "Create a 'Prerequisites' section at the top listing all requirements with versions"
     }}
   ],
   "technical_accessibility": {{
@@ -347,7 +364,8 @@ This markdown may contain build-time directives that reference external files. T
     "code_blocks_without_language": [
       {{
         "line": 23,
-        "content_preview": "pip install lancedb"
+        "content_preview": "npm install mylib",
+        "message": "Code block missing language specifier (should be ```bash or ```shell)"
       }}
     ],
     "total_links_checked": 15,
@@ -368,14 +386,71 @@ This markdown may contain build-time directives that reference external files. T
 }}
 ```
 
+**STEP 2: CALL MCP TOOLS FOR SCORING**
+
+After identifying issues, use the MCP tools to calculate scores:
+
+1. First, call `calculate_clarity_score` with the issues and metrics:
+```
+calculate_clarity_score({{
+  "issues": [<your clarity_issues array>],
+  "metrics": {{
+    "total_code_blocks": <from technical_accessibility>,
+    "successful_examples": <from code validation context>,
+    "failed_examples": <from code validation context>,
+    "total_api_signatures": <from API validation context>,
+    "valid_api_signatures": <from API validation context>,
+    "invalid_api_signatures": <from API validation context>,
+    "missing_api_signatures": 0,
+    "api_accuracy_score": <from API validation context or 0.0>
+  }}
+}})
+```
+
+2. Then, call `get_improvement_roadmap` with the score:
+```
+get_improvement_roadmap({{
+  "issues": [<your clarity_issues array>],
+  "metrics": <same metrics object>,
+  "current_score": <overall_score from calculate_clarity_score>
+}})
+```
+
+3. Finally, call `explain_score`:
+```
+explain_score({{
+  "score": <overall_score>,
+  "breakdown": <breakdown from calculate_clarity_score>,
+  "issues": [<your clarity_issues array>],
+  "metrics": <same metrics object>
+}})
+```
+
+**FINAL OUTPUT FORMAT:**
+
+Return a complete JSON object with ALL fields (including MCP results):
+
+```json
+{{
+  "clarity_issues": [<your issues>],
+  "structural_issues": [<your issues>],
+  "technical_accessibility": {{<your results>}},
+  "summary": {{<your counts>}},
+  "clarity_score": {{<from calculate_clarity_score>}},
+  "breakdown": {{<from calculate_clarity_score>}},
+  "improvement_roadmap": {{<from get_improvement_roadmap>}},
+  "score_explanation": {{<from explain_score>}}
+}}
+```
+
 **IMPORTANT NOTES:**
-- Respond ONLY with the JSON - no explanatory text before or after
 - Include line numbers for EVERY issue
 - Be specific about sections and steps
 - Provide actionable suggested_fix for each issue
 - Actually check links if possible (use Read tool to verify internal links)
 - Count all links, images, and code blocks accurately
-- Focus on finding issues - scoring will be done separately based on your findings"""
+- Call ALL THREE MCP tools in order
+- Return complete JSON with both your analysis AND MCP results"""
 
 
 # ============================================================================
@@ -559,108 +634,6 @@ class DocumentationClarityAgent:
 
         return processed, warnings
 
-    async def call_mcp_tool(
-        self,
-        doc_stem: str,
-        tool_name: str,
-        arguments: Dict[str, Any]
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Call an MCP server tool via Claude Agent SDK with proper logging.
-
-        Args:
-            doc_stem: Document name (for logging)
-            tool_name: Name of the MCP tool
-            arguments: Tool arguments
-
-        Returns:
-            Parsed JSON response or None on error
-        """
-        try:
-            # Setup MCP-specific logging
-            mcp_log_dir = self.validation_log_dir / "clarity_logs" / doc_stem / "mcp"
-            mcp_log_dir.mkdir(parents=True, exist_ok=True)
-
-            mcp_logger = AgentLogger(
-                log_file=mcp_log_dir / "mcp_agent.log",
-                tools_log_file=mcp_log_dir / "mcp_tools.jsonl"
-            )
-            mcp_logging_hooks = create_logging_hooks(mcp_logger)
-
-            mcp_logger.log_message(f"=== MCP Tool Call: {tool_name} ===", level="INFO")
-            mcp_logger.log_message(f"Arguments: {json.dumps(arguments, indent=2)}", level="DEBUG")
-
-            # Create hooks dictionary
-            hooks = {
-                'PreToolUse': mcp_logging_hooks['PreToolUse'],
-                'PostToolUse': mcp_logging_hooks['PostToolUse']
-            }
-
-            # Configure MCP server
-            options = ClaudeAgentOptions(
-                system_prompt="You are a helpful assistant that calls MCP tools.",
-                permission_mode="bypassPermissions",
-                cwd=str(Path.cwd()),
-                hooks=hooks,
-                mcp_servers={
-                    "clarity-scoring": {
-                        "command": "python",
-                        "args": ["-m", "stackbench.mcp_servers.clarity_scoring_server"],
-                    }
-                }
-            )
-
-            async with ClaudeSDKClient(options=options) as client:
-                # Ask Claude to call the MCP tool and return ONLY the raw JSON
-                prompt = f"""Call the {tool_name} tool with these exact arguments:
-
-```json
-{json.dumps(arguments, indent=2)}
-```
-
-CRITICAL: Return ONLY the raw JSON output from the tool - no explanations, no formatting, no markdown. Just the pure JSON object that the tool returns."""
-
-                await client.query(prompt)
-
-                # Get response
-                response_text = ""
-                async for message in client.receive_response():
-                    if isinstance(message, AssistantMessage):
-                        for block in message.content:
-                            if isinstance(block, TextBlock):
-                                response_text += block.text
-
-                # The response might still be formatted - try to extract JSON more aggressively
-                # First try: look for JSON in code blocks
-                json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response_text, re.DOTALL)
-                if json_match:
-                    response_text = json_match.group(1)
-                else:
-                    # Second try: find the first { and last } and extract everything between
-                    start = response_text.find('{')
-                    end = response_text.rfind('}')
-                    if start != -1 and end != -1:
-                        response_text = response_text[start:end+1]
-
-                # Parse JSON
-                try:
-                    result = json.loads(response_text)
-                    mcp_logger.log_message(f"✓ Successfully parsed {tool_name} response", level="INFO")
-                    return result
-                except json.JSONDecodeError as e:
-                    mcp_logger.log_message(f"✗ Failed to parse JSON: {e}", level="ERROR")
-                    mcp_logger.log_message(f"Response: {response_text[:500]}", level="ERROR")
-                    console.print(f"[red]Failed to parse MCP response as JSON: {e}[/red]")
-                    console.print(f"[yellow]Response (first 500 chars):[/yellow]")
-                    console.print(response_text[:500])
-                    return None
-
-        except Exception as e:
-            console.print(f"[red]Error calling MCP tool {tool_name}: {e}[/red]")
-            import traceback
-            traceback.print_exc()
-            return None
-
     def extract_json_from_response(self, response_text: str) -> Optional[Dict[str, Any]]:
         """
         Extract JSON from Claude's response, handling markdown code blocks.
@@ -824,13 +797,20 @@ CRITICAL: Return ONLY the raw JSON output from the tool - no explanations, no fo
                 validation_log_dir=self.validation_log_dir
             )
 
-            # Create options
+            # Create options with MCP server configured
+            import sys
             options = ClaudeAgentOptions(
                 system_prompt=CLARITY_SYSTEM_PROMPT,
-                allowed_tools=["Read"],  # Only needs to read files, not execute
+                allowed_tools=["Read"],  # Read tool + MCP tools
                 permission_mode="acceptEdits",
                 hooks=hooks,
-                cwd=str(Path.cwd())
+                cwd=str(Path.cwd()),
+                mcp_servers={
+                    "clarity-scoring": {
+                        "command": sys.executable,
+                        "args": ["-m", "stackbench.mcp_servers.clarity_scoring_server"],
+                    }
+                }
             )
 
             # Ask Claude to analyze
@@ -854,51 +834,8 @@ CRITICAL: Return ONLY the raw JSON output from the tool - no explanations, no fo
                     console.print(f"[red]Failed to extract JSON from response for {document_page}[/red]")
                     return None
 
-            # Now call MCP server for scoring (outside the Claude client context)
-            console.print(f"[dim]Calling MCP server for deterministic scoring...[/dim]")
-
-            # Load validation metrics
-            results_folder = self.output_folder.parent  # Go up from clarity_validation to results
-            metrics = get_content_metrics_from_validation(doc_stem, results_folder)
-
-            # Prepare issues for MCP server
-            issues = clarity_data.get('clarity_issues', [])
-
-            # Call MCP server: calculate_clarity_score
-            score_result = await self.call_mcp_tool(doc_stem, "calculate_clarity_score", {
-                "issues": issues,
-                "metrics": metrics
-            })
-
-            if not score_result:
-                console.print(f"[red]Failed to calculate clarity score via MCP server[/red]")
-                return None
-
-            clarity_score_data = score_result.get('clarity_score', {})
-            breakdown_data = score_result.get('breakdown', {})
-
-            # Call MCP server: get_improvement_roadmap
-            roadmap_result = await self.call_mcp_tool(doc_stem, "get_improvement_roadmap", {
-                "issues": issues,
-                "metrics": metrics,
-                "current_score": clarity_score_data['overall_score']
-            })
-
-            if not roadmap_result:
-                console.print(f"[red]Failed to generate improvement roadmap[/red]")
-                return None
-
-            # Call MCP server: explain_score
-            explanation_result = await self.call_mcp_tool(doc_stem, "explain_score", {
-                "score": clarity_score_data['overall_score'],
-                "breakdown": breakdown_data,
-                "issues": issues,
-                "metrics": metrics
-            })
-
-            if not explanation_result:
-                console.print(f"[red]Failed to generate score explanation[/red]")
-                return None
+            # Agent now returns complete analysis including MCP results
+            console.print(f"[dim]Agent completed analysis with MCP scoring[/dim]")
 
             # Calculate processing time
             processing_time = int((datetime.now() - start_time).total_seconds() * 1000)
@@ -906,7 +843,24 @@ CRITICAL: Return ONLY the raw JSON output from the tool - no explanations, no fo
             # Combine snippet warnings with agent warnings
             all_warnings = snippet_warnings + clarity_data.get('warnings', [])
 
-            # Construct ClarityValidationOutput with MCP results
+            # Extract data from agent response (which includes MCP tool call results)
+            issues = clarity_data.get('clarity_issues', [])
+            clarity_score_data = clarity_data.get('clarity_score', {})
+            roadmap_result = clarity_data.get('improvement_roadmap', {})
+            explanation_result = clarity_data.get('score_explanation', {})
+
+            # Validate required fields are present
+            if not clarity_score_data:
+                console.print(f"[red]Agent response missing clarity_score (MCP tool not called?)[/red]")
+                return None
+            if not roadmap_result:
+                console.print(f"[red]Agent response missing improvement_roadmap (MCP tool not called?)[/red]")
+                return None
+            if not explanation_result:
+                console.print(f"[red]Agent response missing score_explanation (MCP tool not called?)[/red]")
+                return None
+
+            # Construct ClarityValidationOutput from agent response
             analysis = ClarityValidationOutput(
                 validation_id=str(uuid4()),
                 validated_at=datetime.utcnow().isoformat() + 'Z',

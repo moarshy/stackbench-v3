@@ -31,6 +31,8 @@ from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 from pydantic import BaseModel, Field
 
+# Import centralized schemas
+from stackbench.schemas import APIMetadata
 
 # Configure logging
 logging.basicConfig(
@@ -70,19 +72,7 @@ IMPORTANCE_TIERS = {
 # PYDANTIC MODELS
 # ============================================================================
 
-class APIMetadata(BaseModel):
-    """Metadata about a discovered API."""
-    api: str
-    module: str
-    type: str  # function, class, method, property
-    is_async: bool = False
-    has_docstring: bool = False
-    in_all: bool = False
-    is_deprecated: bool = False
-    deprecation_message: Optional[str] = None
-    alternative_api: Optional[str] = None
-    deprecated_since: Optional[str] = None
-
+# Note: APIMetadata is now imported from stackbench.schemas to avoid duplication
 
 class ImportanceScore(BaseModel):
     """Importance score result."""

@@ -2,14 +2,15 @@
 
 ## Objective
 
-The Clarity Validation Agent evaluates documentation quality from a **user experience perspective** using an LLM-as-judge approach. It:
+The Clarity Validation Agent evaluates documentation quality from a **user experience perspective** using an LLM-as-judge approach **across Python, JavaScript, and TypeScript**. It:
 - Assesses instructional clarity and logical flow
 - Identifies gaps, unclear steps, and missing prerequisites
 - Checks technical accessibility (broken links, missing alt text, code blocks)
+- Verifies language-appropriate syntax patterns (imports/requires, async patterns)
 - Generates clarity scores (0-10 scale) across 5 dimensions
 - Provides actionable improvement roadmap with impact/effort estimates
 
-This agent catches **UX issues** that static analysis misses - problems a real developer would encounter while following a tutorial.
+This agent catches **UX issues** that static analysis misses - problems a real developer would encounter while following a tutorial in any supported language.
 
 ## Position in Pipeline
 
@@ -53,6 +54,7 @@ This agent catches **UX issues** that static analysis misses - problems a real d
 - Original markdown files in `repository_folder`
 - API/Code validation results (optional, for correlation)
 - MCP server for clarity scoring (`stackbench.mcp_servers.clarity_scoring_server`)
+- Language context from extraction metadata (python/javascript/typescript)
 
 ## Expected Output
 
@@ -73,9 +75,9 @@ output_folder/
   "validated_at": "2025-01-15T11:00:00Z",
   "source_file": "quickstart_analysis.json",
   "document_page": "quickstart.md",
-  "library": "lancedb",
-  "version": "0.25.2",
-  "language": "python",
+  "library": "mylib",
+  "version": "1.2.3",
+  "language": "python",  // or "javascript", "typescript"
 
   "clarity_score": {
     "overall_score": 7.5,
@@ -140,7 +142,8 @@ output_folder/
     "code_blocks_without_language": [
       {
         "line": 23,
-        "content_preview": "pip install lancedb"
+        "content_preview": "npm install mylib",
+        "message": "Code block missing language specifier (should be ```bash or ```shell)"
       }
     ],
     "total_links_checked": 15,
@@ -286,90 +289,68 @@ async def analyze_document(extraction_file, repository_folder):
         repository_folder
     )
 
-    # 5. Create Claude agent
+    # 5. Create Claude agent with MCP server configured
     hooks = create_validation_hooks() + create_logging_hooks()
 
-    # 6. Ask Claude to find issues
-    prompt = f"""
-    Analyze this documentation from a user experience perspective.
+    options = ClaudeAgentOptions(
+        system_prompt=CLARITY_SYSTEM_PROMPT,  # Mentions MCP tools
+        allowed_tools=["Read"],
+        mcp_servers={
+            "clarity-scoring": {
+                "command": sys.executable,
+                "args": ["-m", "stackbench.mcp_servers.clarity_scoring_server"],
+            }
+        },
+        hooks=hooks
+    )
 
-    Document: {document_page}
-    Library: {extraction_data["library"]} v{extraction_data["version"]}
+    # 6. Ask Claude to analyze AND call MCP tools
+    async with ClaudeSDKClient(options=options) as client:
+        prompt = f"""
+        Analyze this documentation from a user experience perspective.
 
-    CONTEXT:
-    - API validation results: {summarize(api_validation)}
-    - Code validation results: {summarize(code_validation)}
+        Document: {document_page}
+        Library: {extraction_data["library"]} v{extraction_data["version"]}
+        Language: {extraction_data["language"]}
 
-    INSTRUCTIONS:
-    Evaluate across 5 dimensions:
-    1. Instruction clarity
-    2. Logical flow
-    3. Completeness
-    4. Consistency
-    5. Prerequisite coverage
+        CONTEXT:
+        - API validation results: {summarize(api_validation)}
+        - Code validation results: {summarize(code_validation)}
 
-    Identify issues with:
-    - Specific locations (section, line, step number)
-    - Severity (critical/warning/info)
-    - Actionable suggestions
+        INSTRUCTIONS:
+        1. Find issues across 5 dimensions (clarity, flow, completeness, consistency, prerequisites)
+        2. Check technical accessibility (broken links, missing alt text, code blocks)
+        3. Call MCP tools to calculate scores:
+           - calculate_clarity_score(issues, metrics)
+           - get_improvement_roadmap(issues, metrics, score)
+           - explain_score(score, breakdown, issues, metrics)
+        4. Return complete JSON with issues AND all MCP results
 
-    Check technical accessibility:
-    - Broken links (use Read tool to verify)
-    - Missing alt text
-    - Code blocks without language
+        Content:
+        {processed_content}
+        """
 
-    Content:
-    {processed_content}
+        response = await client.query(prompt)
 
-    Output JSON with:
-    - clarity_issues: []
-    - structural_issues: []
-    - technical_accessibility: {{}}
-    - summary: {{}}
-    """
-
-    response = await claude.query(prompt)
-
-    # 7. Parse issue-finding response
+    # 7. Parse complete response (includes both analysis and MCP results)
     clarity_data = parse_json(response)
 
-    # 8. Call MCP server for deterministic scoring
-    issues = clarity_data["clarity_issues"]
-    metrics = get_content_metrics(doc_stem, results_folder)
+    # Validate MCP tools were called
+    if not clarity_data.get("clarity_score"):
+        raise Error("Agent didn't call MCP tools")
 
-    # Score calculation via MCP
-    score_result = await call_mcp_tool("calculate_clarity_score", {
-        "issues": issues,
-        "metrics": metrics
-    })
-
-    # Roadmap generation via MCP
-    roadmap_result = await call_mcp_tool("get_improvement_roadmap", {
-        "issues": issues,
-        "metrics": metrics,
-        "current_score": score_result["clarity_score"]["overall_score"]
-    })
-
-    # Explanation generation via MCP
-    explanation_result = await call_mcp_tool("explain_score", {
-        "score": score_result["clarity_score"]["overall_score"],
-        "breakdown": score_result["breakdown"],
-        "issues": issues,
-        "metrics": metrics
-    })
-
-    # 9. Combine results
+    # 8. Construct output from single response
     output = ClarityValidationOutput(
-        clarity_score=score_result["clarity_score"],
-        clarity_issues=issues,
+        clarity_score=clarity_data["clarity_score"],
+        clarity_issues=clarity_data["clarity_issues"],
         structural_issues=clarity_data["structural_issues"],
         technical_accessibility=clarity_data["technical_accessibility"],
-        improvement_roadmap=roadmap_result,
-        score_explanation=explanation_result,
+        improvement_roadmap=clarity_data["improvement_roadmap"],
+        score_explanation=clarity_data["score_explanation"],
         summary=clarity_data["summary"]
     )
 
-    # 10. Save
+    # 9. Save
     save_json(output_folder / f"{doc_stem}_clarity.json", output)
 
     return output
@@ -544,22 +525,30 @@ def get_tier(score):
 
 ## Key Features
 
-### 1. **Two-Phase Approach: Finding + Scoring**
+### 1. **Single-Agent Architecture with MCP Tools**
 
-**Phase 1 (Claude)**: Find issues
-- Reads documentation as a user
-- Identifies gaps, unclear steps, broken links
-- NO scoring - just issue detection
+The clarity agent uses a single Claude agent session that calls MCP tools:
 
-**Phase 2 (MCP Server)**: Calculate scores
-- Deterministic scoring algorithm
-- Calculates 5 dimension scores (0-10 each)
-- Overall score = average of dimensions
-- **Tier constraint**: Critical issues or failed examples automatically cap score at 7.9 (max Tier B)
-- Reproducible results
-- Impact/effort estimates for roadmap
+**Phase 1 (Claude - Issue Finding)**:
+- Reads documentation as a user would
+- Identifies gaps, unclear steps, broken links using Read tool
+- Outputs: clarity_issues, structural_issues, technical_accessibility
 
-**Why tier constraints?** Critical issues (broken links, logical gaps that block users) and failed code examples represent fundamental documentation quality problems that should prevent "Excellent" (Tier A/S) ratings, even if other dimensions are perfect.
+**Phase 2 (Claude calls MCP - Scoring)**:
+- Agent calls `calculate_clarity_score(issues, metrics)` → Returns overall score, tier, dimension scores
+- Agent calls `get_improvement_roadmap(issues, metrics, score)` → Returns prioritized fixes with impact/effort
+- Agent calls `explain_score(score, breakdown, issues, metrics)` → Returns human-readable explanation
+
+**Single Response**:
+Agent returns complete JSON with both issue analysis AND all MCP scoring results in one response.
+
+**Why this architecture?**
+- **Efficient**: One agent session instead of 4 separate sessions (old pattern)
+- **Correct MCP usage**: Agent calls MCP tools naturally, not Python orchestrating separate agents
+- **Deterministic scoring**: MCP server ensures reproducible scores
+- **Transparent**: Clear separation between qualitative analysis (agent) and quantitative scoring (MCP)
+
+**Tier Constraint**: Critical issues or failed examples automatically cap score at 7.9 (max Tier B), preventing "Excellent" ratings for fundamentally flawed documentation.
 
 ### 2. **Snippet Pre-processing (Level 2 - Fast Path)**
 
@@ -595,7 +584,25 @@ if example_failed and unclear_instructions_at_same_line:
     })
 ```
 
-### 5. **Improvement Roadmap with Impact/Effort**
+### 5. **Language-Aware Evaluation**
+
+Adapts analysis to the target language:
+
+**Python:**
+- Verifies `import` statements (not `require`)
+- Checks for `async`/`await` patterns
+- Validates type hints if present
+
+**JavaScript/TypeScript:**
+- Verifies `require()`/`import` statements
+- Checks for promises, `.then()` chains, `async`/`await`
+- Validates JSDoc annotations (TypeScript)
+
+**Common:**
+- Code blocks should specify language (```python, ```javascript, ```typescript, ```js, ```ts)
+- Installation commands should match ecosystem (`pip install` vs `npm install`)
+
+### 6. **Improvement Roadmap with Impact/Effort**
 
 Prioritizes fixes by:
 - **Impact** (high/medium/low): How much it improves score

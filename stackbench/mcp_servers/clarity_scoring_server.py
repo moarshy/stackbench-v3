@@ -24,6 +24,17 @@ from typing import Any, Dict, List, Literal, Optional
 from mcp.server.stdio import stdio_server
 from pydantic import BaseModel, Field
 
+# Import centralized schemas from stackbench.schemas
+from stackbench.schemas import (
+    ClarityScore,
+    ScoreBreakdown,
+    ScoreExplanation,
+    ImprovementRoadmap,
+    PrioritizedFix,
+    TierRequirements,
+    ClarityIssue
+)
+
 
 # ============================================================================
 # RUBRIC DEFINITION
@@ -93,12 +104,8 @@ PENALTY_WEIGHTS = {
 
 
 # ============================================================================
-# INPUT SCHEMAS (import from centralized schemas)
+# INPUT SCHEMAS (imported from centralized schemas.py at top)
 # ============================================================================
-
-# Import centralized schema instead of redefining
-from stackbench.schemas import ClarityIssue
-
 
 # Map issue types to dimensions for scoring
 ISSUE_TYPE_TO_DIMENSION = {
@@ -153,83 +160,18 @@ class ContentMetrics(BaseModel):
 # ============================================================================
 # OUTPUT SCHEMAS
 # ============================================================================
+# Note: ClarityScore, ScoreBreakdown, ScoreExplanation, ImprovementRoadmap,
+# PrioritizedFix, and TierRequirements are now imported from stackbench.schemas
+# to avoid duplication and maintain a single source of truth.
 
 
 class DimensionScore(BaseModel):
-    """Score for a single clarity dimension."""
+    """Score for a single clarity dimension (MCP-internal only)."""
 
     dimension: str
     score: float = Field(ge=0.0, le=10.0)
     issues_count: Dict[str, int]  # {"critical": 2, "warning": 3, "info": 1}
     primary_issues: List[str]  # Top 3 issues affecting this dimension
-
-
-class ClarityScore(BaseModel):
-    """Overall clarity score with dimensional breakdown."""
-
-    overall_score: float = Field(ge=0.0, le=10.0)
-    tier: str  # S/A/B/C/D/F
-    instruction_clarity: float = Field(ge=0.0, le=10.0)
-    logical_flow: float = Field(ge=0.0, le=10.0)
-    completeness: float = Field(ge=0.0, le=10.0)
-    consistency: float = Field(ge=0.0, le=10.0)
-    prerequisite_coverage: float = Field(ge=0.0, le=10.0)
-
-
-class PrioritizedFix(BaseModel):
-    """A single improvement action."""
-
-    priority: Literal["critical", "high", "medium", "low"]
-    category: str
-    description: str
-    location: str
-    impact: Literal["high", "medium", "low"]
-    effort: Literal["low", "medium", "high"]
-    projected_score_change: float
-
-
-class ImprovementRoadmap(BaseModel):
-    """Prioritized list of improvements."""
-
-    current_overall_score: float
-    projected_score_after_critical_fixes: float
-    projected_score_after_all_fixes: float
-    prioritized_fixes: List[PrioritizedFix]
-    quick_wins: List[PrioritizedFix]  # High impact + low effort
-
-
-class ScoreBreakdown(BaseModel):
-    """Detailed score calculation breakdown."""
-
-    base_score: float = 10.0
-    critical_issues_penalty: float
-    warning_issues_penalty: float
-    info_issues_penalty: float
-    failed_examples_penalty: float
-    invalid_api_penalty: float
-    missing_api_penalty: float
-    final_score: float
-
-
-class TierRequirements(BaseModel):
-    """Requirements to reach next tier."""
-
-    current_tier: str
-    next_tier: Optional[str]
-    requirements_for_next_tier: Optional[Dict[str, Any]]
-    current_status: Dict[str, int]
-
-
-class ScoreExplanation(BaseModel):
-    """Human-readable score explanation."""
-
-    score: float
-    tier: str
-    tier_description: str
-    score_breakdown: ScoreBreakdown
-    tier_requirements: TierRequirements
-    primary_issues: List[Dict[str, Any]]
-    summary: str
 
 
 # ============================================================================
