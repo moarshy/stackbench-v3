@@ -56,6 +56,7 @@ function App() {
     const params = new URLSearchParams(window.location.search);
     const docName = params.get('doc');
     const tab = params.get('tab');
+    const viewModeParam = params.get('viewMode');
 
     // If run ID in URL, we'll let RunSelector handle loading it
     // This is just for updating the doc and tab after the run loads
@@ -65,11 +66,15 @@ function App() {
     if (tab) {
       setActiveTab(tab);
     }
+    // Restore viewMode from URL, validate it's a valid value
+    if (viewModeParam && ['documents', 'walkthroughs', 'api-coverage'].includes(viewModeParam)) {
+      setViewMode(viewModeParam as 'documents' | 'walkthroughs' | 'api-coverage');
+    }
   }, []);
 
   // Update URL when selections change
   useEffect(() => {
-    if (selectedRun || selectedDoc || activeTab !== 'extraction') {
+    if (selectedRun || selectedDoc || activeTab !== 'extraction' || viewMode !== 'documents') {
       const params = new URLSearchParams();
       if (selectedRun) {
         params.set('run', selectedRun.run_id);
@@ -80,10 +85,12 @@ function App() {
       if (activeTab !== 'extraction') {
         params.set('tab', activeTab);
       }
+      // Always persist viewMode to URL
+      params.set('viewMode', viewMode);
       const newUrl = `${window.location.pathname}${params.toString() ? '?' + params.toString() : ''}`;
       window.history.replaceState({}, '', newUrl);
     }
-  }, [selectedRun, selectedDoc, activeTab]);
+  }, [selectedRun, selectedDoc, activeTab, viewMode]);
 
   // Load documentation files when run is selected
   useEffect(() => {
