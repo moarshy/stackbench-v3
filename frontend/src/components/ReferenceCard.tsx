@@ -28,46 +28,51 @@ export function ReferenceCard({ reference, onClick }: ReferenceCardProps) {
   return (
     <div
       onClick={onClick}
-      className="p-4 border border-border rounded-lg hover:shadow-md hover:border-primary transition-all cursor-pointer bg-card"
+      className="settings-help-box cursor-pointer transition-all hover:shadow-md"
+      style={{ marginBottom: 0 }}
     >
-      {/* Document name and type badge */}
-      <div className="flex items-center justify-between gap-2 mb-2">
-        <div className="flex items-center gap-2 flex-1 min-w-0">
-          <FileText className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
-          <span className="font-medium truncate">{reference.document}</span>
+      <div className="settings-help-box-content">
+        <FileText className="h-5 w-5 settings-help-box-icon" />
+        <div className="settings-help-box-text" style={{ width: '100%' }}>
+          {/* Document name and type badge */}
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <p className="settings-help-box-title" style={{ marginBottom: 0 }}>{reference.document}</p>
+            {getContextTypeBadge(reference.context_type)}
+          </div>
+
+          {/* Section hierarchy breadcrumb */}
+          {reference.section_hierarchy && reference.section_hierarchy.length > 0 && (
+            <p className="settings-help-box-description" style={{ marginBottom: '0.75rem' }}>
+              {reference.section_hierarchy.join(' › ')}
+            </p>
+          )}
+
+          {/* Context preview */}
+          <div className="settings-code-block" style={{ marginBottom: '0.75rem' }}>
+            <div style={{ fontSize: '0.8125rem' }}>
+              <span style={{ color: 'hsl(var(--muted-foreground))' }}>Line {reference.line_number}:</span>
+              {' '}
+              <span style={{ color: 'hsl(var(--foreground))' }}>{reference.raw_context}</span>
+            </div>
+          </div>
+
+          {/* Additional metadata */}
+          {(reference.markdown_anchor || reference.code_block_index !== null) && (
+            <div className="flex items-center gap-3 mb-2" style={{ fontSize: '0.75rem', color: 'hsl(var(--muted-foreground))' }}>
+              {reference.markdown_anchor && (
+                <code className="settings-help-box-code">{reference.markdown_anchor}</code>
+              )}
+              {reference.code_block_index !== null && (
+                <span className="settings-help-box-code">Block #{reference.code_block_index}</span>
+              )}
+            </div>
+          )}
+
+          {/* Navigation hint */}
+          <p className="settings-help-box-description" style={{ marginTop: '0.5rem', fontWeight: 600, color: 'hsl(var(--primary))' }}>
+            Click to view in document →
+          </p>
         </div>
-        {getContextTypeBadge(reference.context_type)}
-      </div>
-
-      {/* Section hierarchy breadcrumb */}
-      {reference.section_hierarchy.length > 0 && (
-        <div className="text-sm text-muted-foreground mb-2 truncate">
-          {reference.section_hierarchy.join(' › ')}
-        </div>
-      )}
-
-      {/* Context preview */}
-      <div className="text-xs bg-muted p-2 rounded mb-2">
-        <div className="flex items-start gap-2">
-          <span className="text-muted-foreground">Line {reference.line_number}:</span>
-          <span className="flex-1">{reference.raw_context}</span>
-        </div>
-      </div>
-
-      {/* Additional metadata */}
-      <div className="flex items-center gap-3 text-xs text-muted-foreground">
-        {reference.markdown_anchor && (
-          <span className="font-mono">{reference.markdown_anchor}</span>
-        )}
-        {reference.code_block_index !== null && (
-          <span>Block #{reference.code_block_index}</span>
-        )}
-      </div>
-
-      {/* Navigation hint */}
-      <div className="text-xs text-primary mt-2 flex items-center gap-1">
-        <span>Click to view in document</span>
-        <span>→</span>
       </div>
     </div>
   );

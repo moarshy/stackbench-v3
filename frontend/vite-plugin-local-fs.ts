@@ -109,12 +109,22 @@ export function localFileSystemPlugin(): Plugin {
           }
 
           try {
-            const files = await fs.readdir(dirPath);
+            const entries = await fs.readdir(dirPath, { withFileTypes: true });
+            // Only return directories (which represent run IDs), not files like runs.json
+            const directories = entries
+              .filter(entry => entry.isDirectory())
+              .map(entry => entry.name);
             res.setHeader('Content-Type', 'application/json');
-            res.end(JSON.stringify(files));
-          } catch (error) {
-            res.statusCode = 500;
-            res.end(JSON.stringify({ error: 'Failed to read directory' }));
+            res.end(JSON.stringify(directories));
+          } catch (error: any) {
+            // If directory doesn't exist (ENOENT), return empty array instead of error
+            if (error.code === 'ENOENT') {
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify([]));
+            } else {
+              res.statusCode = 500;
+              res.end(JSON.stringify({ error: 'Failed to read directory' }));
+            }
           }
           return;
         }

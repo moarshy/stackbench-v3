@@ -354,7 +354,7 @@ function App() {
                 >
                   <PieChart className="h-4 w-4" />
                   API Coverage
-                  {apiCompleteness && (
+                  {apiCompleteness?.coverage_summary && (
                     <span className="px-1.5 py-0.5 rounded-full bg-primary text-primary-foreground text-xs">
                       {apiCompleteness.coverage_summary.coverage_percentage.toFixed(0)}%
                     </span>
@@ -523,20 +523,20 @@ function App() {
                   <div className="p-4 border border-border rounded-lg bg-card">
                     <div className="text-sm text-muted-foreground mb-1">With Examples</div>
                     <div className="text-3xl font-bold text-blue-600">
-                      {apiCompleteness.coverage_summary.with_examples}
+                      {apiCompleteness.coverage_summary.with_examples ?? 0}
                     </div>
                     <div className="text-xs text-muted-foreground mt-1">
-                      {apiCompleteness.coverage_summary.example_coverage_percentage.toFixed(1)}% have code examples
+                      {(apiCompleteness.coverage_summary.example_coverage_percentage ?? 0).toFixed(1)}% have code examples
                     </div>
                   </div>
 
                   <div className="p-4 border border-border rounded-lg bg-card">
                     <div className="text-sm text-muted-foreground mb-1">Complete Docs</div>
                     <div className="text-3xl font-bold text-purple-600">
-                      {apiCompleteness.coverage_summary.with_dedicated_sections}
+                      {apiCompleteness.coverage_summary.with_dedicated_sections ?? 0}
                     </div>
                     <div className="text-xs text-muted-foreground mt-1">
-                      {apiCompleteness.coverage_summary.complete_coverage_percentage.toFixed(1)}% with dedicated sections
+                      {(apiCompleteness.coverage_summary.complete_coverage_percentage ?? 0).toFixed(1)}% with dedicated sections
                     </div>
                   </div>
 
@@ -546,22 +546,25 @@ function App() {
                       {apiCompleteness.coverage_summary.undocumented}
                     </div>
                     <div className="text-xs text-muted-foreground mt-1">
-                      {apiCompleteness.undocumented_apis.filter(api => api.importance === 'high').length} high priority
+                      {(Array.isArray(apiCompleteness.undocumented_apis)
+                        ? apiCompleteness.undocumented_apis.filter(api => api.importance === 'high').length
+                        : (apiCompleteness.undocumented_apis?.high_priority || []).length
+                      )} high priority
                     </div>
                   </div>
                 </div>
 
                 {/* Deprecated APIs Warning */}
-                {apiCompleteness.deprecated_in_docs.length > 0 && (
+                {(apiCompleteness.deprecated_in_docs || []).length > 0 && (
                   <div className="p-4 border border-red-200 dark:border-red-900 rounded-lg bg-red-50 dark:bg-red-950">
                     <h3 className="text-lg font-semibold text-red-900 dark:text-red-100 mb-2">
                       ⚠️ Deprecated APIs in Documentation
                     </h3>
                     <p className="text-sm text-red-800 dark:text-red-200 mb-3">
-                      Found {apiCompleteness.deprecated_in_docs.length} deprecated API(s) still being taught in docs
+                      Found {(apiCompleteness.deprecated_in_docs || []).length} deprecated API(s) still being taught in docs
                     </p>
                     <div className="space-y-2">
-                      {apiCompleteness.deprecated_in_docs.map((dep, idx) => (
+                      {(apiCompleteness.deprecated_in_docs || []).map((dep, idx) => (
                         <div key={idx} className="p-3 bg-white dark:bg-gray-900 rounded border border-red-200 dark:border-red-800">
                           <code className="text-sm font-mono">{dep.api}</code>
                           <p className="text-xs text-muted-foreground mt-1">{dep.suggestion}</p>

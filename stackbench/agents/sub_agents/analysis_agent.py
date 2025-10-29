@@ -181,7 +181,7 @@ Write to: {output_file}
 
 Format:
 {{
-  "summary": {{
+  "coverage_summary": {{
     "total_apis": {total_apis},
     "documented": <count>,
     "undocumented": <count>,

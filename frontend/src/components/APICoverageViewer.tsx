@@ -20,8 +20,9 @@ export function APICoverageViewer({ apiCompleteness, onNavigateToDoc }: APICover
   const [filterTier, setFilterTier] = useState<number | 'all'>('all');
   const [filterImportance, setFilterImportance] = useState<'all' | 'high' | 'medium' | 'low'>('all');
 
-  // Filter API details
-  const filteredAPIs = apiCompleteness.api_details.filter(api => {
+  // Filter API details (with fallback for legacy/incomplete data)
+  const apiDetails = apiCompleteness.api_details || [];
+  const filteredAPIs = apiDetails.filter(api => {
     const matchesSearch = !searchQuery ||
       api.api.toLowerCase().includes(searchQuery.toLowerCase()) ||
       api.module.toLowerCase().includes(searchQuery.toLowerCase());
@@ -93,13 +94,117 @@ export function APICoverageViewer({ apiCompleteness, onNavigateToDoc }: APICover
       {/* Overview Tab */}
       {activeTab === 'overview' && (
         <div className="space-y-6">
-          {/* Keep existing summary cards */}
+          {/* Coverage by Type */}
           <div>
-            <h3 className="text-lg font-semibold mb-4">Coverage Summary</h3>
-            <p className="text-sm text-muted-foreground mb-4">
-              This view shows the existing overview. All APIs tab now includes rich documentation references.
-            </p>
+            <h3 className="text-lg font-semibold mb-4">Coverage by Type</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {apiCompleteness.coverage_by_type && Object.entries(apiCompleteness.coverage_by_type).map(([type, stats]: [string, any]) => (
+                <div key={type} className="p-4 border border-border rounded-lg bg-card">
+                  <div className="text-sm font-medium text-muted-foreground mb-2 capitalize">{type}s</div>
+                  <div className="flex items-baseline gap-2 mb-1">
+                    <span className="text-2xl font-bold">{stats.documented}/{stats.total}</span>
+                    <span className="text-sm text-muted-foreground">documented</span>
+                  </div>
+                  <div className="text-lg font-semibold text-primary">{stats.coverage.toFixed(1)}%</div>
+                  <div className="mt-2 h-2 bg-muted rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-primary transition-all"
+                      style={{ width: `${stats.coverage}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
+
+          {/* Coverage Distribution by Tier */}
+          <div>
+            <h3 className="text-lg font-semibold mb-4">Coverage Distribution by Quality</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              How well are the documented APIs covered? Higher tiers indicate better documentation quality.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {apiCompleteness.coverage_distribution && Object.entries(apiCompleteness.coverage_distribution).map(([tier, data]: [string, any]) => {
+                const tierColors: Record<string, { bg: string; border: string; bar: string; text: string; count: string }> = {
+                  tier_3_comprehensive: {
+                    bg: 'bg-emerald-50 dark:bg-emerald-950/30',
+                    border: 'border-emerald-200 dark:border-emerald-800',
+                    bar: 'bg-emerald-500',
+                    text: 'text-emerald-900 dark:text-emerald-100',
+                    count: 'text-emerald-600 dark:text-emerald-400'
+                  },
+                  tier_2_good: {
+                    bg: 'bg-blue-50 dark:bg-blue-950/30',
+                    border: 'border-blue-200 dark:border-blue-800',
+                    bar: 'bg-blue-500',
+                    text: 'text-blue-900 dark:text-blue-100',
+                    count: 'text-blue-600 dark:text-blue-400'
+                  },
+                  tier_1_basic: {
+                    bg: 'bg-amber-50 dark:bg-amber-950/30',
+                    border: 'border-amber-200 dark:border-amber-800',
+                    bar: 'bg-amber-500',
+                    text: 'text-amber-900 dark:text-amber-100',
+                    count: 'text-amber-600 dark:text-amber-400'
+                  },
+                  tier_0_undocumented: {
+                    bg: 'bg-rose-50 dark:bg-rose-950/30',
+                    border: 'border-rose-200 dark:border-rose-800',
+                    bar: 'bg-rose-500',
+                    text: 'text-rose-900 dark:text-rose-100',
+                    count: 'text-rose-600 dark:text-rose-400'
+                  }
+                };
+                const colors = tierColors[tier] || tierColors.tier_1_basic;
+                const tierName = tier.replace('tier_', 'Tier ').replace('_', ' - ').split(' - ').map(word =>
+                  word.charAt(0).toUpperCase() + word.slice(1)
+                ).join(' - ');
+
+                return (
+                  <div key={tier} className={`p-5 border ${colors.border} rounded-lg ${colors.bg} transition-all hover:shadow-md`}>
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex-1">
+                        <div className={`text-base font-bold mb-1 ${colors.text}`}>{tierName}</div>
+                        <div className="text-xs text-muted-foreground leading-relaxed">{data.description}</div>
+                      </div>
+                      <div className="text-right ml-4">
+                        <div className={`text-3xl font-bold ${colors.count}`}>{data.count}</div>
+                        <div className={`text-sm font-medium ${colors.count}`}>{data.percentage.toFixed(1)}%</div>
+                      </div>
+                    </div>
+                    <div className="h-2.5 bg-white dark:bg-gray-900 rounded-full overflow-hidden shadow-inner">
+                      <div
+                        className={`h-full ${colors.bar} transition-all duration-500 ease-out`}
+                        style={{ width: `${data.percentage}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Deprecated APIs */}
+          {apiCompleteness.coverage_summary?.deprecated_count > 0 && (
+            <div>
+              <h3 className="text-lg font-semibold mb-4">Deprecated APIs</h3>
+              <div className="p-5 border border-amber-200 dark:border-amber-800 rounded-lg bg-amber-50 dark:bg-amber-950/30 hover:shadow-md transition-all">
+                <div className="flex items-center gap-4">
+                  <div className="flex-shrink-0 w-16 h-16 rounded-full bg-amber-100 dark:bg-amber-900 flex items-center justify-center">
+                    <div className="text-3xl font-bold text-amber-700 dark:text-amber-300">
+                      {apiCompleteness.coverage_summary.deprecated_count}
+                    </div>
+                  </div>
+                  <div className="flex-1">
+                    <div className="text-base font-bold text-amber-900 dark:text-amber-100 mb-1">Deprecated APIs Found</div>
+                    <div className="text-sm text-amber-800 dark:text-amber-200">
+                      These APIs are marked as deprecated and may need documentation updates or removal warnings.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -168,10 +273,10 @@ export function APICoverageViewer({ apiCompleteness, onNavigateToDoc }: APICover
                   </div>
                 </div>
 
-                {api.documentation_references.length > 0 && (
+                {api.documentation_references && api.documentation_references.length > 0 && (
                   <div className="text-xs text-muted-foreground">
                     Documented in {api.documentation_references.length} location{api.documentation_references.length !== 1 ? 's' : ''}: {' '}
-                    {api.documented_in.join(', ')}
+                    {api.documented_in && api.documented_in.join(', ')}
                   </div>
                 )}
               </div>
@@ -196,53 +301,62 @@ export function APICoverageViewer({ apiCompleteness, onNavigateToDoc }: APICover
 
       {/* API Detail Modal */}
       {selectedAPI && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-          <div className="bg-background border border-border rounded-lg shadow-xl max-w-4xl w-full max-h-[80vh] overflow-hidden flex flex-col">
+        <div className="settings-modal-backdrop" onClick={() => setSelectedAPI(null)}>
+          <div className="settings-modal-container" onClick={(e) => e.stopPropagation()}>
             {/* Header */}
-            <div className="p-6 border-b border-border flex items-start justify-between">
+            <div className="settings-modal-header">
               <div className="flex-1">
-                <h3 className="text-xl font-mono font-bold mb-2">{selectedAPI.api}</h3>
-                <div className="flex items-center gap-3">
+                <h2 className="settings-modal-title font-mono">
+                  {selectedAPI.api}
+                </h2>
+                <div className="flex items-center gap-3 flex-wrap mt-2">
                   <span className="text-sm text-muted-foreground">{selectedAPI.module}</span>
                   <span className="text-muted-foreground">•</span>
-                  <span className="text-sm px-2 py-0.5 rounded bg-muted">{selectedAPI.type}</span>
+                  <span className="text-sm px-2 py-0.5 rounded bg-muted text-foreground font-medium">{selectedAPI.type}</span>
                   {getTierBadge(selectedAPI.coverage_tier)}
                   {getImportanceBadge(selectedAPI.importance)}
                 </div>
               </div>
               <button
                 onClick={() => setSelectedAPI(null)}
-                className="p-2 rounded-md hover:bg-accent"
+                className="settings-modal-close-btn"
+                aria-label="Close API details"
               >
                 <X className="h-5 w-5" />
               </button>
             </div>
 
             {/* Content */}
-            <div className="flex-1 overflow-auto p-6 space-y-6">
+            <div className="settings-modal-content">
               {/* Stats */}
-              <div className="grid grid-cols-3 gap-4">
-                <div className="p-3 bg-muted rounded-lg">
-                  <div className="text-xs text-muted-foreground mb-1">Importance Score</div>
-                  <div className="text-2xl font-bold">{selectedAPI.importance_score}/10</div>
+              <div className="grid grid-cols-3 gap-4 mb-8">
+                <div className="settings-help-box" style={{ marginBottom: 0 }}>
+                  <div className="settings-help-box-text">
+                    <p className="settings-subsection-title" style={{ marginBottom: '0.5rem' }}>Importance Score</p>
+                    <div className="text-3xl font-bold" style={{ color: 'hsl(var(--foreground))' }}>{selectedAPI.importance_score}/10</div>
+                  </div>
                 </div>
-                <div className="p-3 bg-muted rounded-lg">
-                  <div className="text-xs text-muted-foreground mb-1">Documents</div>
-                  <div className="text-2xl font-bold">{selectedAPI.documented_in.length}</div>
+                <div className="settings-help-box" style={{ marginBottom: 0 }}>
+                  <div className="settings-help-box-text">
+                    <p className="settings-subsection-title" style={{ marginBottom: '0.5rem' }}>Documents</p>
+                    <div className="text-3xl font-bold" style={{ color: 'hsl(var(--foreground))' }}>{selectedAPI.documented_in?.length || 0}</div>
+                  </div>
                 </div>
-                <div className="p-3 bg-muted rounded-lg">
-                  <div className="text-xs text-muted-foreground mb-1">References</div>
-                  <div className="text-2xl font-bold">{selectedAPI.documentation_references.length}</div>
+                <div className="settings-help-box" style={{ marginBottom: 0 }}>
+                  <div className="settings-help-box-text">
+                    <p className="settings-subsection-title" style={{ marginBottom: '0.5rem' }}>References</p>
+                    <div className="text-3xl font-bold" style={{ color: 'hsl(var(--foreground))' }}>{selectedAPI.documentation_references?.length || 0}</div>
+                  </div>
                 </div>
               </div>
 
               {/* Documentation References */}
-              <div>
-                <h4 className="font-semibold mb-3 flex items-center gap-2">
-                  <ExternalLink className="h-4 w-4" />
+              <div className="settings-divider">
+                <h3 className="settings-label">
+                  <ExternalLink className="settings-label-icon" />
                   Documentation References
-                </h4>
-                {selectedAPI.documentation_references.length > 0 ? (
+                </h3>
+                {selectedAPI.documentation_references && selectedAPI.documentation_references.length > 0 ? (
                   <div className="space-y-3">
                     {selectedAPI.documentation_references.map((ref, idx) => (
                       <ReferenceCard
@@ -256,7 +370,7 @@ export function APICoverageViewer({ apiCompleteness, onNavigateToDoc }: APICover
                     ))}
                   </div>
                 ) : (
-                  <p className="text-sm text-muted-foreground">
+                  <p className="settings-input-hint">
                     This API is not documented anywhere.
                   </p>
                 )}

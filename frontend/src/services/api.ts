@@ -377,7 +377,81 @@ export class APIService {
         return null;
       }
 
-      return await response.json();
+      const data = await response.json();
+
+      // Backwards compatibility: handle legacy format with "summary" instead of "coverage_summary"
+      if (data && data.summary && !data.coverage_summary) {
+        data.coverage_summary = data.summary;
+
+        // Extract top-level fields from summary
+        if (!data.library) data.library = data.summary.library;
+        if (!data.version) data.version = data.summary.version;
+        if (!data.analyzed_at) data.analyzed_at = data.summary.generated_at;
+
+        delete data.summary;
+      }
+
+      // Calculate missing fields from documented_apis if needed
+      if (data && data.documented_apis && data.coverage_summary) {
+        const documentedApis = Array.isArray(data.documented_apis) ? data.documented_apis : [];
+
+        // Calculate with_examples if missing
+        if (data.coverage_summary.with_examples === undefined) {
+          data.coverage_summary.with_examples = documentedApis.filter(api => api.has_examples).length;
+        }
+
+        // Calculate with_dedicated_sections (tier 3) if missing
+        if (data.coverage_summary.with_dedicated_sections === undefined) {
+          data.coverage_summary.with_dedicated_sections = documentedApis.filter(api => api.coverage_tier === 3).length;
+        }
+
+        // Calculate percentages if missing
+        const total = data.coverage_summary.total_apis || 0;
+        if (total > 0) {
+          if (data.coverage_summary.example_coverage_percentage === undefined) {
+            data.coverage_summary.example_coverage_percentage = (data.coverage_summary.with_examples / total) * 100;
+          }
+          if (data.coverage_summary.complete_coverage_percentage === undefined) {
+            data.coverage_summary.complete_coverage_percentage = (data.coverage_summary.with_dedicated_sections / total) * 100;
+          }
+        }
+      }
+
+      // Merge documented_apis and undocumented_apis into api_details for frontend compatibility
+      if (data && !data.api_details) {
+        const undocumentedAPIs = [];
+
+        // undocumented_apis is an object with priority categories, flatten it
+        if (data.undocumented_apis) {
+          if (Array.isArray(data.undocumented_apis.high_priority)) {
+            undocumentedAPIs.push(...data.undocumented_apis.high_priority);
+          }
+          if (Array.isArray(data.undocumented_apis.medium_priority)) {
+            undocumentedAPIs.push(...data.undocumented_apis.medium_priority);
+          }
+          if (Array.isArray(data.undocumented_apis.low_priority)) {
+            undocumentedAPIs.push(...data.undocumented_apis.low_priority);
+          }
+        }
+
+        // Add missing fields to undocumented APIs to match the structure
+        const normalizedUndocumented = undocumentedAPIs.map(api => ({
+          ...api,
+          coverage_tier: 0,
+          reference_count: 0,
+          documentation_references: [],
+          documented_in: [],
+          has_examples: false,
+          has_dedicated_section: false
+        }));
+
+        data.api_details = [
+          ...(data.documented_apis || []),
+          ...normalizedUndocumented
+        ];
+      }
+
+      return data;
     } catch (error) {
       console.error('Error fetching API completeness data:', error);
       return null;
