@@ -84,17 +84,17 @@ You MUST:
 3. Helper libraries may appear in code examples but should NOT have their signatures extracted
 4. Exception: If "{library_name}" methods are chained (e.g., db.create_table(), table.search()), extract them
 
-Examples of what TO extract for lancedb:
-- ✅ lancedb.connect(uri)
-- ✅ db.create_table(name, data)  # db is from lancedb.connect()
-- ✅ table.search(vector)  # table is from db.open_table()
-- ✅ await lancedb.connect_async(uri)
+Examples of what TO extract (assuming primary library is "mylib"):
+- ✅ mylib.connect(uri)
+- ✅ client.create_resource(name, data)  # client is from mylib.connect()
+- ✅ resource.query(params)  # resource is from client.get_resource()
+- ✅ await mylib.connect_async(uri)
 
-Examples of what NOT to extract for lancedb:
+Examples of what NOT to extract (helper/dependency libraries):
 - ❌ pd.DataFrame(data)  # pandas helper
-- ❌ pa.schema([...])  # pyarrow helper
+- ❌ json.loads(text)  # standard library helper
 - ❌ np.array([...])  # numpy helper
-- ❌ pa.field(name, type)  # pyarrow helper
+- ❌ requests.get(url)  # requests helper
 
 Extract:
 1. **Library Information**: Primary library name, version (if mentioned), programming language
@@ -169,37 +169,22 @@ Critical requirements:
 - **IMPORTANT**: code_block_index MUST be an integer (use 0 if you cannot determine the index), NEVER null
 
 **EXECUTION CONTEXT DETECTION (for code examples)**:
-You MUST set `execution_context` based on the code's async patterns:
+Set `execution_context` based on async patterns (Python/JS/TS):
 
-1. **"async"** - Code contains async/await that needs async context:
-   - Has `await` keyword at top level (outside any function)
-   - Has `async def` function definitions
-   - Has `async with` or `async for` statements
-   - Examples:
-     * `async_db = await lancedb.connect_async(uri)` → "async"
-     * `result = await table.search(...)` → "async"
-     * `async def main(): ...` → "async"
+- **"async"** - Contains `await`, `async def/function`, `async with/for`, or `.then()` chains
+  - `await client.connect()` → "async"
+  - `async function main() {{ }}` → "async"
+  - `promise.then(...)` → "async"
 
-2. **"sync"** - Regular synchronous code that runs as-is:
-   - No async/await keywords
-   - Regular function definitions
-   - Standard Python code
-   - Examples:
-     * `db = lancedb.connect(uri)` → "sync"
-     * `df = pd.DataFrame(data)` → "sync"
-     * `table.search(vector).limit(10)` → "sync"
+- **"sync"** - Regular synchronous code without async patterns
+  - `client.connect()` → "sync"
+  - `const data = processData()` → "sync"
 
-3. **"not_executable"** - Incomplete snippets or pseudocode:
-   - Missing imports/context
-   - Contains ellipsis (...) or placeholders
-   - Partial code fragments
-   - Examples:
-     * `table.search(...)` → "not_executable"
-     * `# ... rest of code` → "not_executable"
+- **"not_executable"** - Incomplete snippets with `...`, placeholders, or missing context
+  - `client.query(...)` → "not_executable"
+  - `// ... rest of code` → "not_executable"
 
-**IMPORTANT**: `is_executable` is DEPRECATED but still required for backwards compatibility:
-- If `execution_context` is "sync" → set `is_executable: true`
-- If `execution_context` is "async" or "not_executable" → set `is_executable: false`
+**Backwards compatibility**: Set `is_executable: true` if "sync", else `false`
 """
 
 
@@ -287,43 +272,6 @@ class DocumentationExtractionAgent:
         # Fallback to docs folder parent
         return start_path.parent
 
-    def _detect_library_name(self, doc_path: Path) -> str:
-        """
-        Auto-detect the primary library name from documentation path or filename.
-
-        Args:
-            doc_path: Path to the documentation file
-
-        Returns:
-            Detected library name (e.g., 'lancedb', 'fastapi')
-        """
-        # Strategy 1: Check if repo root has a clear library name
-        if self.repo_root.name not in ['docs', 'documentation', 'repo']:
-            return self.repo_root.name.lower()
-
-        # Strategy 2: Look for pyproject.toml to get package name
-        pyproject = self.repo_root / "pyproject.toml"
-        if pyproject.exists():
-            try:
-                import sys
-                if sys.version_info >= (3, 11):
-                    import tomllib
-                else:
-                    try:
-                        import tomli as tomllib
-                    except ImportError:
-                        pass  # Fall through to next strategy
-
-                if 'tomllib' in dir():
-                    with open(pyproject, 'rb') as f:
-                        data = tomllib.load(f)
-                        if 'project' in data and 'name' in data['project']:
-                            return data['project']['name'].lower()
-            except Exception:
-                pass  # Fall through to next strategy
-
-        # Fallback: use repo root name
-        return self.repo_root.name.lower()
     
     def extract_json_from_response(self, response_text: str) -> Optional[Dict[str, Any]]:
         """Extract JSON from Claude's response, handling markdown code blocks."""
@@ -397,13 +345,13 @@ class DocumentationExtractionAgent:
 
         return response_text
     
-    async def analyze_document(self, doc_path: Path, library_name: Optional[str] = None) -> DocumentAnalysis:
+    async def analyze_document(self, doc_path: Path, library_name: str) -> DocumentAnalysis:
         """
         Analyze a single markdown document and extract structured information.
 
         Args:
             doc_path: Path to the markdown document
-            library_name: Primary library name to extract (if None, will be auto-detected)
+            library_name: Primary library name to extract (required)
 
         Returns:
             DocumentAnalysis containing extracted signatures and examples
@@ -413,10 +361,6 @@ class DocumentationExtractionAgent:
         # Read document content
         with open(doc_path, 'r', encoding='utf-8') as f:
             content = f.read()
-
-        # Auto-detect library name if not provided
-        if not library_name:
-            library_name = self._detect_library_name(doc_path)
 
         warnings = []
 
@@ -547,7 +491,7 @@ class DocumentationExtractionAgent:
     async def process_document(
         self,
         doc_path: Path,
-        library_name: Optional[str] = None
+        library_name: str
     ) -> Optional[DocumentAnalysis]:
         """
         Process a single markdown document (extract signatures and examples).
@@ -557,7 +501,7 @@ class DocumentationExtractionAgent:
 
         Args:
             doc_path: Path to markdown file to process
-            library_name: Primary library name to extract (if None, will be auto-detected)
+            library_name: Primary library name to extract (required)
 
         Returns:
             DocumentAnalysis if successful, None if extraction failed
@@ -594,7 +538,7 @@ class DocumentationExtractionAgent:
     async def _process_document_with_save(
         self,
         doc_path: Path,
-        library_name: Optional[str],
+        library_name: str,
         semaphore: asyncio.Semaphore,
         progress: Dict[str, int]
     ) -> Optional[DocumentAnalysis]:
@@ -618,12 +562,12 @@ class DocumentationExtractionAgent:
                 print(f"❌ [{progress['completed']}/{progress['total']}] {doc_path.name} - {e}")
                 return None
 
-    async def process_all_documents(self, library_name: Optional[str] = None) -> ExtractionSummary:
+    async def process_all_documents(self, library_name: str) -> ExtractionSummary:
         """
         Process all markdown files in the docs folder using parallel workers.
 
         Args:
-            library_name: Primary library name to extract (if None, will be auto-detected for each document)
+            library_name: Primary library name to extract (required)
 
         Returns:
             ExtractionSummary containing results for all processed documents, including timing metrics
