@@ -458,12 +458,25 @@ class DocumentationValidationPipeline:
 
         # 8. Run API Completeness Analysis (after all extractions complete)
         console.print("\n[cyan]🔍 Analyzing API completeness...[/cyan]")
+
+        # Determine docs folder (use docs_path if provided, otherwise default to docs/)
+        if self.docs_path:
+            docs_folder = self.run_context.repo_dir / self.docs_path
+        else:
+            docs_folder = self.run_context.repo_dir / "docs"
+
+        # Extraction folder is optional (for enrichment)
+        extraction_folder = self.run_context.results_dir / "extraction"
+        if not extraction_folder.exists() or not list(extraction_folder.glob("*.json")):
+            extraction_folder = None
+
         completeness_agent = APICompletenessAgent(
-            extraction_folder=self.run_context.results_dir / "extraction",
+            docs_folder=docs_folder,
             output_folder=self.run_context.results_dir / "api_completeness",
             library_name=self.library_name,
             library_version=self.library_version,
-            language="python",
+            language="python",  # TODO: Auto-detect from library name
+            extraction_folder=extraction_folder,
             validation_log_dir=self.run_context.run_dir / "validation_logs"
         )
 

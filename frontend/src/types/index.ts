@@ -538,28 +538,37 @@ export interface DeprecatedInDocs {
 
 export interface DocumentationReference {
   document: string;
-  section_hierarchy: string[];
-  markdown_anchor: string | null;
   line_number: number;
-  context_type: 'signature' | 'example' | 'mention';
-  code_block_index: number | null;
-  raw_context: string;
+  context: string;
+  match_type: 'import' | 'function_call' | 'method_call' | 'type_annotation' | 'class_instantiation' | 'mention';
+  matched_variant?: string;
+  in_code_block?: boolean;
+
+  // Optional: from extraction metadata enrichment
+  section_hierarchy?: string[];
+  markdown_anchor?: string | null;
+  code_block_index?: number | null;
 }
 
 export interface APIDetail {
   api: string;
   module: string;
   type: string;
+  is_async: boolean;
+  has_docstring: boolean;
+  in_all: boolean;
   is_deprecated: boolean;
+  signature: string;
   coverage_tier: number;
 
   // Rich documentation references
   documentation_references: DocumentationReference[];
+  reference_count: number; // NEW: Total number of references found
 
-  // Backward compatible (derived from documentation_references)
+  // Derived from documentation_references
   documented_in: string[];
   has_examples: boolean;
-  has_dedicated_section: boolean;
+  has_dedicated_section?: boolean;
   importance: 'high' | 'medium' | 'low';
   importance_score: number;
 }
