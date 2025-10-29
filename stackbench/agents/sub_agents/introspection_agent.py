@@ -22,18 +22,17 @@ from claude_agent_sdk import (
     ClaudeSDKClient,
     ClaudeAgentOptions,
     AssistantMessage,
-    TextBlock,
 )
 
 from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv())
 
 
-INTROSPECTION_SYSTEM_PROMPT = """You are an API introspection specialist.
+INTROSPECTION_SYSTEM_PROMPT = """You are an API introspection specialist for Python, JavaScript, and TypeScript.
 
 Your ONLY job is to:
-1. Install a library via pip
-2. Run the introspection template
+1. Install a library using the appropriate package manager
+2. Run the language-specific introspection template
 3. Read the JSON output
 4. Write it to the output file
 
@@ -43,10 +42,24 @@ Your ONLY job is to:
 - Analyze coverage
 - Build complex reports
 
-**Your workflow:**
+**Your workflow varies by language:**
+
+**Python:**
 1. `pip install {library}=={version}`
 2. `cp stackbench/introspection_templates/python_introspect.py /tmp/introspect_{library}.py`
 3. `python /tmp/introspect_{library}.py {library} {version} > /tmp/introspection_result.json`
+
+**JavaScript:**
+1. `npm install {library}@{version}` (or `yarn add {library}@{version}`)
+2. `cp stackbench/introspection_templates/javascript_introspect.js /tmp/introspect_{library}.js`
+3. `node /tmp/introspect_{library}.js {library} {version} > /tmp/introspection_result.json`
+
+**TypeScript:**
+1. `npm install {library}@{version}` (or `yarn add {library}@{version}`)
+2. `cp stackbench/introspection_templates/typescript_introspect.ts /tmp/introspect_{library}.ts`
+3. `ts-node /tmp/introspect_{library}.ts {library} {version} > /tmp/introspection_result.json`
+
+Then:
 4. Read `/tmp/introspection_result.json`
 5. Write exact contents to `{output_file}`
 
@@ -64,20 +77,52 @@ Output File: {output_file}
 
 STEP 1: Install Library
 ========================
+
+**Python:**
 ```bash
 pip install {library}=={version}
 ```
 
+**JavaScript/TypeScript:**
+```bash
+npm install {library}@{version}
+```
+(or use `yarn add {library}@{version}` if yarn is preferred)
+
 STEP 2: Copy Introspection Template
 ====================================
+
+**Python:**
 ```bash
 cp stackbench/introspection_templates/python_introspect.py /tmp/introspect_{library}.py
 ```
 
+**JavaScript:**
+```bash
+cp stackbench/introspection_templates/javascript_introspect.js /tmp/introspect_{library}.js
+```
+
+**TypeScript:**
+```bash
+cp stackbench/introspection_templates/typescript_introspect.ts /tmp/introspect_{library}.ts
+```
+
 STEP 3: Run Introspection
 ==========================
+
+**Python:**
 ```bash
 python /tmp/introspect_{library}.py {library} {version} > /tmp/introspection_result.json
+```
+
+**JavaScript:**
+```bash
+node /tmp/introspect_{library}.js {library} {version} > /tmp/introspection_result.json
+```
+
+**TypeScript:**
+```bash
+ts-node /tmp/introspect_{library}.ts {library} {version} > /tmp/introspection_result.json
 ```
 
 STEP 4: Read Result
@@ -90,7 +135,7 @@ STEP 5: Write Output
 ====================
 Write the exact JSON contents to: {output_file}
 
-The JSON should have this structure:
+The JSON should have this structure (language-agnostic format):
 {{
   "library": "{library}",
   "version": "{version}",
@@ -116,6 +161,7 @@ The JSON should have this structure:
 - Do NOT modify the JSON structure
 - Do NOT add extra fields
 - Write EXACTLY what the introspection template outputs
+- The output format is the same across all languages
 """
 
 

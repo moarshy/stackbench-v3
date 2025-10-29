@@ -2,16 +2,24 @@
 """
 API Completeness MCP Server
 
-Provides deterministic API introspection, importance scoring, and coverage analysis
-for documentation completeness validation. Separates deterministic operations (this server)
-from qualitative analysis (completeness agent).
+Provides deterministic API importance scoring and coverage analysis for documentation
+completeness validation across Python, JavaScript, and TypeScript.
+
+**Language-Agnostic Design:**
+- All tools operate on standardized APIMetadata format (from introspection templates)
+- Importance scoring heuristics work identically across languages
+- Coverage classification is language-independent
+- Metrics calculations are universal
+
+**Note on Introspection:**
+API discovery is handled by language-specific templates run by the IntrospectionAgent,
+not by this MCP server. This server only provides deterministic scoring/analysis tools.
 
 Tools:
-1. introspect_library - Discover all public APIs in a library via inspect module
-2. calculate_importance_score - Score API importance based on heuristics
-3. classify_coverage - Determine coverage tier for an API
-4. calculate_metrics - Compute coverage percentages and summaries
-5. prioritize_undocumented - Rank undocumented APIs by importance
+1. calculate_importance_score - Score API importance based on heuristics
+2. classify_coverage - Determine coverage tier for an API
+3. calculate_metrics - Compute coverage percentages and summaries
+4. prioritize_undocumented - Rank undocumented APIs by importance
 """
 
 import sys

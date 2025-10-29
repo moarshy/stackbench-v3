@@ -18,20 +18,19 @@ import json
 import sys
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, Any
 
 from claude_agent_sdk import (
     ClaudeSDKClient,
     ClaudeAgentOptions,
     AssistantMessage,
-    TextBlock,
 )
 
 from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv())
 
 
-MATCHING_SYSTEM_PROMPT = """You are an API documentation matching specialist.
+MATCHING_SYSTEM_PROMPT = """You are an API documentation matching specialist for Python, JavaScript, and TypeScript.
 
 Your ONLY job is to:
 1. Read api_surface.json (all discovered APIs)
@@ -54,11 +53,29 @@ Your ONLY job is to:
 6. Write {documented_output_file}
 7. Write {undocumented_output_file}
 
-**Pattern Matching Tips:**
-- Look for exact API names in signatures
-- Look for API usage in code examples (e.g., "lancedb.connect()")
+**Pattern Matching Tips (Multi-Language):**
+
+**Python:**
+- Exact API names: "mylib.connect()"
+- Import patterns: "import mylib", "from mylib import connect"
+- Method calls: "db.create_table()", "client.query()"
+- Flexible with module prefixes
+
+**JavaScript:**
+- Require patterns: "const mylib = require('mylib')", "const {{ connect }} = require('mylib')"
+- Method calls: "mylib.connect()", "db.createTable()"
+- Property access: "client.database"
+
+**TypeScript:**
+- Import patterns: "import mylib from 'mylib'", "import {{ connect }} from 'mylib'"
+- Type annotations: "const db: Database = ...", "function foo(client: Client)"
+- Method calls with types: "db.createTable<T>()"
+
+**Common Patterns:**
 - Check class names, method names, function names
-- Be flexible with module prefixes (e.g., "connect" matches "lancedb.connect")
+- Be flexible with naming conventions (snake_case in Python, camelCase in JS/TS)
+- Look for both "Table.search" and "Table.search()" patterns
+- Match partial names (e.g., "connect" matches "mylib.connect")
 
 Focus on accurate matching and comprehensive coverage!"""
 
@@ -93,13 +110,35 @@ For each API from api_surface.json, determine if it's documented by checking:
 1. **Signature matching**: Does the API name appear in any signature's function/class name?
    - Example: "connect" matches signature with function="connect"
    - Example: "Table.search" matches class="Table", method="search"
+   - Example: "createTable" matches function="createTable" (JS/TS)
 
 2. **Code example matching**: Does the API appear in code examples?
-   - Example: "lancedb.connect(" in code
-   - Example: "db.create_table(" in code
-   - Example: "import lancedb" in code
 
-3. **Build references**: For each match, record:
+   **Python:**
+   - "mylib.connect(" in code
+   - "db.create_table(" in code
+   - "import mylib" in code
+   - "from mylib import connect" in code
+
+   **JavaScript:**
+   - "require('mylib')" in code
+   - "mylib.connect(" in code
+   - "db.createTable(" in code
+   - "const {{ connect }} = require('mylib')" in code
+
+   **TypeScript:**
+   - "import mylib from 'mylib'" in code
+   - "import {{ connect }} from 'mylib'" in code
+   - "const db: Database =" in code
+   - "db.createTable<T>(" in code
+
+3. **Naming Convention Flexibility**:
+   - Match snake_case (Python) to camelCase (JS/TS) variations:
+     - "create_table" matches "createTable"
+     - "Table.add_data" matches "Table.addData"
+   - Match exact names first, then flexible names
+
+4. **Build references**: For each match, record:
    - document: filename
    - section_hierarchy: breadcrumb
    - markdown_anchor: section ID
@@ -113,8 +152,8 @@ For EACH API (both documented and undocumented), call the MCP tool:
 
 ```
 calculate_importance_score(
-    api="lancedb.connect",
-    module="lancedb",
+    api="mylib.connect",
+    module="mylib",
     type="function",
     has_docstring=true,
     in_all=true
@@ -123,7 +162,7 @@ calculate_importance_score(
 
 Returns:
 {{
-  "api": "lancedb.connect",
+  "api": "mylib.connect",
   "score": 9,
   "tier": "high",
   "reasons": ["In __all__", "Has documentation", "Public API", "Common pattern"],
@@ -139,8 +178,8 @@ Format:
   "total_documented": <count>,
   "apis": [
     {{
-      "api": "lancedb.connect",
-      "module": "lancedb",
+      "api": "mylib.connect",
+      "module": "mylib",
       "type": "function",
       "is_async": false,
       "has_docstring": true,
@@ -184,8 +223,8 @@ Format:
   "total_undocumented": <count>,
   "apis": [
     {{
-      "api": "lancedb.Database.drop_table",
-      "module": "lancedb.db",
+      "api": "mylib.Database.dropTable",
+      "module": "mylib.database",
       "type": "method",
       "is_async": false,
       "has_docstring": true,

@@ -23,14 +23,13 @@ from claude_agent_sdk import (
     ClaudeSDKClient,
     ClaudeAgentOptions,
     AssistantMessage,
-    TextBlock,
 )
 
 from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv())
 
 
-ANALYSIS_SYSTEM_PROMPT = """You are an API documentation analysis specialist.
+ANALYSIS_SYSTEM_PROMPT = """You are an API documentation analysis specialist for Python, JavaScript, and TypeScript.
 
 Your ONLY job is to:
 1. Read api_surface.json (all discovered APIs)
@@ -52,6 +51,11 @@ Your ONLY job is to:
 5. Call MCP classify_coverage for each documented API
 6. Call MCP prioritize_undocumented for ranking
 7. Write {output_file}
+
+**Language-Aware Analysis:**
+- Report works identically across Python, JavaScript, and TypeScript
+- Naming conventions (snake_case vs camelCase) are preserved from introspection
+- Coverage metrics are language-agnostic
 
 Focus on building a comprehensive, well-structured report!"""
 
@@ -103,7 +107,7 @@ For EACH documented API, call the MCP tool:
 
 ```
 classify_coverage(
-    api="lancedb.connect",
+    api="mylib.connect",
     documented_in=["quickstart.md", "api.md"],
     has_examples=true,
     importance_score=9
@@ -130,8 +134,8 @@ Call the MCP tool with all undocumented APIs:
 ```
 prioritize_undocumented(
     apis_with_scores=[
-        {{"api": "lancedb.Database.drop_table", "importance_score": 8, "type": "method"}},
-        {{"api": "lancedb.Table.count_rows", "importance_score": 7, "type": "method"}},
+        {{"api": "mylib.Database.dropTable", "importance_score": 8, "type": "method"}},
+        {{"api": "mylib.Table.countRows", "importance_score": 7, "type": "method"}},
         ...
     ]
 )
@@ -141,7 +145,7 @@ Returns:
 {{
   "high_priority": [
     {{
-      "api": "lancedb.Database.drop_table",
+      "api": "mylib.Database.dropTable",
       "importance_score": 8,
       "priority_rank": 1,
       "reason": "High importance, common CRUD operation"
@@ -219,8 +223,8 @@ Format:
 
   "documented_apis": [
     {{
-      "api": "lancedb.connect",
-      "module": "lancedb",
+      "api": "mylib.connect",
+      "module": "mylib",
       "type": "function",
       "coverage_tier": 3,
       "importance_score": 9,
@@ -241,8 +245,8 @@ Format:
   "undocumented_apis": {{
     "high_priority": [
       {{
-        "api": "lancedb.Database.drop_table",
-        "module": "lancedb.db",
+        "api": "mylib.Database.dropTable",
+        "module": "mylib.database",
         "type": "method",
         "importance_score": 8,
         "priority_rank": 1,
@@ -256,18 +260,18 @@ Format:
   "deprecated_apis": {{
     "documented": [
       {{
-        "api": "lancedb.old_connect",
-        "module": "lancedb",
+        "api": "mylib.oldConnect",
+        "module": "mylib",
         "type": "function",
-        "deprecation_info": "Use lancedb.connect() instead",
+        "deprecation_info": "Use mylib.connect() instead",
         "documented_in": ["quickstart.md"],
         "action": "Update or remove from documentation"
       }}
     ],
     "undocumented": [
       {{
-        "api": "lancedb.Database.old_method",
-        "module": "lancedb.db",
+        "api": "mylib.Database.oldMethod",
+        "module": "mylib.database",
         "type": "method",
         "deprecation_info": "Deprecated in 0.24.0",
         "action": "No action needed (already not in docs)"
