@@ -6,7 +6,7 @@ extraction, validation, and analysis agents. All schemas are defined here
 to avoid duplication and ensure consistency.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Dict, Any, Optional
 
 
@@ -37,6 +37,14 @@ class APISignature(BaseModel):
     section_hierarchy: List[str] = Field(default_factory=list, description="Hierarchical section path, e.g., ['Create & Query', 'From Polars DataFrame', 'Sync API']")
     markdown_anchor: Optional[str] = Field(None, description="Markdown heading anchor/ID, e.g., '#from-polars-dataframe'")
     code_block_index: int = Field(default=0, description="Index of code block within the section (0, 1, 2...)")
+
+    @field_validator('method_chain', mode='before')
+    @classmethod
+    def convert_method_chain_list_to_string(cls, v):
+        """Convert list of method names to dot-separated string (handles agent mistakes)."""
+        if isinstance(v, list):
+            return '.'.join(v) if v else None
+        return v
 
 
 class CodeExample(BaseModel):

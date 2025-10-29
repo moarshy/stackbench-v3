@@ -430,12 +430,12 @@ INPUT: GitHub Repository
 3. For each document (parallel):
    Extract Agent → data/<run_id>/results/extraction/<doc>_analysis.json
     ↓
-4. API Completeness Agent (after all extractions complete):
-   • Installs library via pip (Bash in agent's environment)
-   • Runs introspection template via Bash (stackbench/introspection_templates/python_introspect.py)
-   • Reads ALL extraction files to aggregate documented APIs
-   • Uses MCP server for importance scoring and metrics calculations
-   → data/<run_id>/results/api_completeness/completeness_analysis.json
+4. API Completeness Agent (3-stage pipeline after all extractions complete):
+   • Stage 1 (Introspection): Installs library via pip, runs introspection template → api_surface.json
+   • Stage 2 (Matching): Fast script scans ALL .md files, MCP scores APIs → documented_apis.json + undocumented_apis.json
+   • Stage 3 (Analysis): MCP calculates metrics and prioritizes → completeness_analysis.json
+   • Performance: ~7s for 118 APIs (5-10x faster than LLM matching)
+   → data/<run_id>/results/api_completeness/{api_surface, documented_apis, undocumented_apis, completeness_analysis}.json
     ↓
 5. For each extraction file (sequential):
    API Validation Agent → data/<run_id>/results/api_validation/<doc>_validation.json

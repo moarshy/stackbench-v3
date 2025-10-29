@@ -203,6 +203,7 @@ def calculate_score(
 
     # Calculate penalties
     breakdown = ScoreBreakdown(
+        base_score=10.0,  # Start with perfect score
         critical_issues_penalty=critical_count * PENALTY_WEIGHTS["critical_issue"],
         warning_issues_penalty=warning_count * PENALTY_WEIGHTS["warning_issue"],
         info_issues_penalty=info_count * PENALTY_WEIGHTS["info_issue"],

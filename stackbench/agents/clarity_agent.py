@@ -450,7 +450,17 @@ Return a complete JSON object with ALL fields (including MCP results):
 - Actually check links if possible (use Read tool to verify internal links)
 - Count all links, images, and code blocks accurately
 - Call ALL THREE MCP tools in order
-- Return complete JSON with both your analysis AND MCP results"""
+- Return complete JSON with both your analysis AND MCP results
+
+**CRITICAL: YOU MUST CALL THE MCP TOOLS!**
+
+Do NOT try to calculate scores yourself. Do NOT return a response without calling all three MCP tools:
+1. `calculate_clarity_score` - REQUIRED
+2. `get_improvement_roadmap` - REQUIRED
+3. `explain_score` - REQUIRED
+
+If you don't call these tools, your response will be rejected and the document will fail validation.
+The MCP tools are available and ready to use - simply call them with the correct parameters as shown above."""
 
 
 # ============================================================================
@@ -802,7 +812,8 @@ class DocumentationClarityAgent:
             options = ClaudeAgentOptions(
                 system_prompt=CLARITY_SYSTEM_PROMPT,
                 allowed_tools=["Read"],  # Read tool + MCP tools
-                permission_mode="acceptEdits",
+                permission_mode="bypassPermissions",  # Required for MCP tools to work without prompting
+                # Note: Validation hooks will still work because they intercept Write calls before execution
                 hooks=hooks,
                 cwd=str(Path.cwd()),
                 mcp_servers={
@@ -858,6 +869,21 @@ class DocumentationClarityAgent:
                 return None
             if not explanation_result:
                 console.print(f"[red]Agent response missing score_explanation (MCP tool not called?)[/red]")
+                return None
+
+            # Validate clarity_score has required fields (detect if agent returned wrong structure)
+            required_score_fields = ['overall_score', 'tier', 'instruction_clarity', 'logical_flow',
+                                      'completeness', 'consistency', 'prerequisite_coverage']
+            missing_fields = [f for f in required_score_fields if f not in clarity_score_data]
+            if missing_fields:
+                console.print(f"[red]Agent returned invalid clarity_score structure. Missing fields: {missing_fields}[/red]")
+                console.print(f"[dim]Received: {list(clarity_score_data.keys())}[/dim]")
+                console.print(f"[yellow]Agent may have hallucinated a response instead of calling MCP tools properly.[/yellow]")
+                console.print(f"[yellow]This is likely due to:[/yellow]")
+                console.print(f"[yellow]  1. Prompt too complex/long for the agent to follow[/yellow]")
+                console.print(f"[yellow]  2. Agent not understanding it should call MCP tools[/yellow]")
+                console.print(f"[yellow]  3. MCP tools not recognized (check server configuration)[/yellow]")
+                console.print(f"[yellow]Skipping this document. Check agent logs for details.[/yellow]")
                 return None
 
             # Construct ClarityValidationOutput from agent response

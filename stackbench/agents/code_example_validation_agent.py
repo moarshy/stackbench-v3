@@ -120,17 +120,17 @@ Examples may have an "execution_context" field indicating if they need async han
   - Wrap in an async IIFE (Immediately Invoked Function Expression) or use top-level await (if supported)
   - Template:
     ```javascript
-    (async () => {
+    (async () => {{
         // ... original code here ...
-    })();
+    }})();
     ```
   - Example: If code is `const data = await client.fetch()`, execute as:
     ```javascript
-    (async () => {
-        const client = require('{library}');
+    (async () => {{
+        const client = require('{{library}}');
         const data = await client.fetch();
         console.log(data);
-    })();
+    }})();
     ```
 
 **"sync"** - Regular code:

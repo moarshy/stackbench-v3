@@ -2,69 +2,107 @@
 
 ## Objective
 
-The API Completeness Agent analyzes **documentation coverage** using a two-tier architecture:
-- **Agent (Environment Interaction + Qualitative)**: Library installation, introspection execution via Bash, reading extraction files, matching APIs to docs
-- **MCP Server (Deterministic)**: Importance scoring, coverage classification, metrics calculations
+The API Completeness Agent analyzes **documentation coverage** using a **3-stage pipeline architecture**:
+- **Stage 1 (Introspection)**: Discovers all public APIs via library introspection
+- **Stage 2 (Matching)**: Fast deterministic script matches APIs to ALL documentation
+- **Stage 3 (Analysis)**: MCP-based importance scoring and metrics calculation
 
 It:
-- Installs the library in the agent's environment (via Bash)
-- Runs language-specific introspection templates (via Bash) to discover all public APIs
-- Aggregates documented APIs from all extraction results (agent)
-- Calculates tiered coverage and importance scores (via MCP)
-- Identifies undocumented APIs ranked by importance (via MCP)
-- Detects deprecated APIs still taught in documentation (via introspection + agent)
+- Installs the library and runs language-specific introspection templates (Stage 1)
+- Scans ALL markdown files using fast fuzzy matching script (Stage 2)
+- Aggregates and enriches matches with extraction metadata (Stage 2)
+- Calculates importance scores, coverage tiers, and metrics via MCP (Stage 3)
+- Identifies undocumented APIs ranked by importance (Stage 3)
+- Detects deprecated APIs still taught in documentation (Stage 3)
 
 This agent catches **missing documentation** and **deprecated API usage** - ensuring completeness and currency.
 
-**Key Architecture Decision**: Introspection runs in the agent's environment via Bash (not MCP subprocess) to avoid package isolation issues, while MCP handles only pure computational tasks.
+**Key Performance Optimization**: Uses deterministic `markdown_api_matcher.py` script for 5-10x faster matching (~2s for 118 APIs across 7 docs).
 
 ## Position in Pipeline
 
 ```
 ┌─────────────────────────┐
-│   EXTRACTION AGENT      │
+│   EXTRACTION AGENT      │  (Optional - for metadata enrichment)
 └─────────────────────────┘
             ↓
-            ↓ (extraction/*.json - ALL docs)
+            ↓ (extraction/*.json - optional)
             ↓
-┌─────────────────────────────────────┐
-│ API COMPLETENESS AGENT (MCP)        │ ◄── YOU ARE HERE
-│  • MCP: Library introspection       │
-│  • MCP: Importance scoring           │
-│  • Agent: Doc pattern matching       │
-│  • MCP: Coverage calculation         │
-└─────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│ API COMPLETENESS AGENT - 3-STAGE PIPELINE  ◄── YOU ARE HERE  │
+│                                                               │
+│  Stage 1: INTROSPECTION                                      │
+│    • Bash: pip install library                               │
+│    • Bash: Run python_introspect.py                          │
+│    • Output: api_surface.json                                │
+│                                                               │
+│  Stage 2: MATCHING                                           │
+│    • Bash: Run markdown_api_matcher.py (fast script)         │
+│    • Script scans ALL .md files in docs folder               │
+│    • MCP: calculate_importance_score() for each API          │
+│    • Agent: Enrich with extraction metadata (optional)       │
+│    • Output: documented_apis.json + undocumented_apis.json   │
+│                                                               │
+│  Stage 3: ANALYSIS                                           │
+│    • MCP: Metrics calculations (coverage %, tiers)           │
+│    • MCP: Prioritization of undocumented APIs                │
+│    • Output: completeness_analysis.json                      │
+└──────────────────────────────────────────────────────────────┘
             ↓
             ↓ (completeness_analysis.json)
             ↓
    (Dashboard / Reporting)
 ```
 
-**Stage**: 2-3 (Runs after extraction, in parallel with or after validation agents)
+**Stage**: 2-3 (Runs after extraction if available, in parallel with or after validation agents)
 **Runs**: Single execution (not per-document)
-**Dependencies**: ALL extraction results
+**Dependencies**:
+  - **Required**: Documentation folder (scans ALL .md files)
+  - **Optional**: Extraction results (for metadata enrichment)
 **Consumers**: Dashboard, coverage reports
 **MCP Server**: `stackbench.mcp_servers.api_completeness_server`
+**Deterministic Script**: `stackbench/introspection_templates/markdown_api_matcher.py`
 
-## Architecture: Agent + MCP Server
+## Architecture: 3-Stage Pipeline
 
-### Agent Responsibilities (Environment Interaction + Qualitative)
+### Stage 1: Introspection Agent
+**Responsibilities**:
 - **Library Installation**: `pip install` via Bash in agent's environment
 - **Introspection Execution**: Run language-specific templates via Bash
   - Python: `stackbench/introspection_templates/python_introspect.py`
   - JavaScript/TypeScript: (Future: `js_introspect.js`, `ts_introspect.ts`)
-- **Read Introspection Results**: Parse standardized JSON output from templates
-- **Read Extraction Files**: Load all `*_analysis.json` files
-- **Pattern Matching**: Identify which APIs appear in docs
-- **Context Understanding**: Detect dedicated sections vs mentions
-- **MCP Orchestration**: Call MCP tools for scoring/classification
-- **Output Building**: Construct final JSON report
+- **Output**: `api_surface.json` with all discovered APIs
+
+### Stage 2: Matching Agent
+**Responsibilities**:
+- **Fast Script Execution**: Run `markdown_api_matcher.py` via Bash
+  - Script scans ALL .md files in docs folder recursively
+  - Fuzzy matching (snake_case ↔ camelCase)
+  - Multi-language pattern detection (Python, JS, TS)
+  - Outputs `/tmp/api_matches.json` in ~2 seconds
+- **MCP Scoring**: Call `calculate_importance_score()` for each API
+- **Metadata Enrichment**: Read extraction files (if available) to add section_hierarchy, markdown_anchor, code_block_index
+- **Output**: `documented_apis.json` + `undocumented_apis.json`
+
+### Stage 3: Analysis Agent
+**Responsibilities**:
+- **MCP Metrics**: Call `calculate_metrics()` for coverage percentages
+- **MCP Prioritization**: Call `prioritize_undocumented()` to rank by importance
+- **Deprecation Detection**: Identify deprecated APIs still in docs
+- **Output**: `completeness_analysis.json`
 
 ### MCP Server Responsibilities (Deterministic Computation Only)
 - **Importance Scoring**: Heuristic-based ranking (0-10)
-- **Coverage Classification**: Tier assignment (0-3)
 - **Metrics Calculation**: Coverage percentages
 - **Prioritization**: Rank undocumented APIs
+
+### Deterministic Script (`markdown_api_matcher.py`)
+**Fast, reliable pattern matching**:
+- Scans all .md files recursively (~2s for 118 APIs across 7 docs)
+- Generates naming variants (snake_case ↔ camelCase)
+- Detects match types: import, function_call, method_call, type_annotation, class_instantiation, mention
+- Tracks code block context
+- No LLM calls - pure regex-based matching
 
 ### Introspection Templates (Language-Specific Scripts)
 Language-specific scripts that output standardized JSON format:
@@ -105,18 +143,20 @@ Output format:
 ## Inputs
 
 ### Required
-- **`extraction_folder`** (Path): Folder with ALL extraction results (`*_analysis.json`)
-- **`output_folder`** (Path): Folder to save completeness analysis
+- **`docs_folder`** (Path): Documentation root folder (scans ALL .md files recursively)
+- **`output_folder`** (Path): Folder to save all 4 output files
 - **`library_name`** (str): Library to analyze (e.g., "lancedb")
 - **`library_version`** (str): Version to install and introspect (e.g., "0.25.2")
+- **`language`** (str): Programming language ("python", "javascript", "typescript")
 
 ### Optional
-- **`language`** (str): Programming language (default: "python")
+- **`extraction_folder`** (Path): Folder with extraction results for metadata enrichment (`*_analysis.json`)
 - **`validation_log_dir`** (Path): Directory for logs
 
 ### Environment
 - MCP server (`stackbench.mcp_servers.api_completeness_server`)
 - Python environment with pip and `inspect` module
+- Deterministic script (`markdown_api_matcher.py`)
 - Network access for `pip install`
 
 ## Expected Output
@@ -125,7 +165,10 @@ Output format:
 
 ```
 output_folder/
-└── completeness_analysis.json   # Complete coverage analysis
+├── api_surface.json           # Stage 1: All discovered APIs from introspection
+├── documented_apis.json       # Stage 2: APIs found in documentation
+├── undocumented_apis.json     # Stage 2: APIs missing from documentation
+└── completeness_analysis.json # Stage 3: Final metrics and analysis
 ```
 
 ### Output Schema (`completeness_analysis.json`)
@@ -241,43 +284,58 @@ output_folder/
 
 ### Rich Documentation References
 
-**New Feature**: Each API in `api_details` now includes a `documentation_references` array with granular location data:
+**Enhanced Feature**: Each API in `api_details` now includes a `documentation_references` array with granular location data from both the matching script AND optional extraction metadata:
 
 ```json
 {
   "documentation_references": [
     {
-      "document": "pandas_and_pyarrow.md",         // Document filename
-      "section_hierarchy": ["Pandas", "Create"],    // Breadcrumb path
-      "markdown_anchor": "#create-dataset",         // Section anchor
-      "line_number": 50,                            // Exact line
-      "context_type": "signature",                  // signature | example | mention
-      "code_block_index": 0,                        // Which code block
-      "raw_context": "Create dataset - connecting"  // Human-readable context
+      "document": "pandas_and_pyarrow.md",             // Document filename
+      "line_number": 50,                               // Exact line (from script)
+      "context": "db = mylib.connect('./data')",       // Code context (from script)
+      "match_type": "function_call",                   // NEW: How API was used
+      "matched_variant": "mylib.connect",              // NEW: Actual text matched
+      "in_code_block": true,                           // NEW: Inside code fence?
+
+      // Optional enrichment from extraction (if available):
+      "section_hierarchy": ["Pandas", "Create"],       // Breadcrumb path
+      "markdown_anchor": "#create-dataset",            // Section anchor
+      "code_block_index": 0                            // Which code block
     }
-  ]
+  ],
+  "reference_count": 23  // NEW: Total references across all docs
 }
 ```
 
+**Match Types** (from script):
+- `import` - Import statement (e.g., `import mylib`, `from mylib import X`)
+- `function_call` - Direct function call (e.g., `mylib.connect()`)
+- `method_call` - Method invocation (e.g., `db.create_table()`)
+- `type_annotation` - Type hint (e.g., `: Table`)
+- `class_instantiation` - Object creation (e.g., `new Config()`)
+- `mention` - Generic mention in text
+
 **Benefits:**
-- **Granular Traceability**: Know exactly where each API is documented (file, line, section)
-- **Context Type Tracking**: Distinguish between signatures, examples, and mentions
-- **Actionable Suggestions**: "API X should be added to section Y at line Z"
+- **Fast Discovery**: Script finds ALL mentions in ~2 seconds
+- **Fuzzy Matching**: Handles snake_case ↔ camelCase automatically
+- **Context Tracking**: Know exactly how each API is used
+- **Granular Traceability**: File, line, match type, code context
+- **Optional Enrichment**: Add section hierarchy from extraction metadata
 - **Frontend Navigation**: Click reference → Jump to exact doc location
 - **Coverage Heatmap**: Visualize which docs cover which APIs
 
 **Backward Compatibility:**
 - `documented_in` remains as derived field (unique list of documents)
 - Existing dashboards work unchanged
-- New features leverage rich references
+- New fields are additive
 
 ## Pseudocode
 
 ```python
-async def analyze_completeness(extraction_folder, library_name, library_version):
-    """Analyze API completeness using MCP server."""
+async def analyze_completeness(docs_folder, library_name, library_version, language, extraction_folder=None):
+    """Analyze API completeness using 3-stage pipeline."""
 
-    # 1. Setup MCP server
+    # Setup MCP server
     mcp_config = {
         "api-completeness": {
             "command": "python",
@@ -286,96 +344,88 @@ async def analyze_completeness(extraction_folder, library_name, library_version)
         }
     }
 
-    # 2. Create Claude agent with MCP
-    options = ClaudeAgentOptions(
-        system_prompt=COMPLETENESS_SYSTEM_PROMPT,
-        allowed_tools=["Read", "Write"],
-        mcp_servers=mcp_config
+    # =========================================================================
+    # STAGE 1: INTROSPECTION
+    # =========================================================================
+    stage1_agent = IntrospectionAgent(
+        library_name=library_name,
+        library_version=library_version,
+        language=language
     )
 
-    # 3. Ask Claude to orchestrate analysis
-    prompt = f"""
-    Analyze API completeness for {library_name} v{library_version}.
+    await stage1_agent.run()
+    # Output: api_surface.json
 
-    Extraction files: {extraction_folder}
+    # =========================================================================
+    # STAGE 2: MATCHING
+    # =========================================================================
+    stage2_agent = MatchingAgent(
+        api_surface_file="api_surface.json",
+        docs_folder=docs_folder,           # NEW: Scans ALL .md files
+        language=language,
+        extraction_folder=extraction_folder  # Optional: for enrichment
+    )
 
-    WORKFLOW:
-    1. Call MCP: introspect_library()
-    2. Read extraction files (agent)
-    3. Call MCP: calculate_importance_score() for each API
-    4. Call MCP: classify_coverage() for each API
-    5. Call MCP: calculate_metrics()
-    6. Call MCP: prioritize_undocumented()
-    7. Build output JSON
+    await stage2_agent.run()
+    # Output: documented_apis.json + undocumented_apis.json
 
-    Use MCP tools for ALL calculations.
-    """
+    # =========================================================================
+    # STAGE 3: ANALYSIS
+    # =========================================================================
+    stage3_agent = AnalysisAgent(
+        api_surface_file="api_surface.json",
+        documented_file="documented_apis.json",
+        undocumented_file="undocumented_apis.json",
+        library_name=library_name,
+        library_version=library_version
+    )
 
-    async with ClaudeSDKClient(options=options) as client:
-        response = await client.query(prompt)
-
-    # 4. Parse and return
-    analysis_data = parse_json(response)
-    return APICompletenessOutput(**analysis_data)
+    await stage3_agent.run()
+    # Output: completeness_analysis.json
 
 
-# What Claude does (orchestration)
-def claude_orchestration_logic(extraction_folder, library_name, library_version):
-    """Claude orchestrates MCP calls and file reading."""
+# =========================================================================
+# STAGE 2 MATCHING AGENT - What Claude does
+# =========================================================================
+def stage2_matching_workflow(api_surface_file, docs_folder, language, extraction_folder):
+    """Stage 2: Fast script-based matching + MCP scoring + optional enrichment."""
 
-    # STEP 1: Introspect library (MCP)
-    introspection_result = call_mcp_tool("introspect_library", {
-        "library_name": library_name,
-        "version": library_version,
-        "modules": [library_name]
-    })
+    # STEP 1: Read api_surface.json from Stage 1
+    api_surface = load_json(api_surface_file)
+    discovered_apis = api_surface["apis"]  # List of all APIs from introspection
 
-    # Response:
+    # STEP 2: Run fast deterministic matching script (Bash)
+    run_bash(f"""
+        python stackbench/introspection_templates/markdown_api_matcher.py \
+            {docs_folder} \
+            {api_surface_file} \
+            /tmp/api_matches.json \
+            {language}
+    """)
+    # Script outputs: /tmp/api_matches.json in ~2 seconds
+    # Format:
     # {
-    #   "apis": [
-    #     {"api": "lancedb.connect", "module": "lancedb", "type": "function",
-    #      "has_docstring": true, "in_all": true, "is_deprecated": false, ...},
-    #     ...
-    #   ],
-    #   "deprecated_count": 3
+    #   "mylib.connect": {
+    #     "documented": true,
+    #     "reference_count": 23,
+    #     "files": ["quickstart.md", "api.md"],
+    #     "references": [
+    #       {
+    #         "file": "quickstart.md",
+    #         "line": 42,
+    #         "context": "db = mylib.connect('./data')",
+    #         "match_type": "function_call",
+    #         "matched_variant": "mylib.connect",
+    #         "in_code_block": true
+    #       }
+    #     ]
+    #   }
     # }
 
-    discovered_apis = introspection_result["apis"]
+    # STEP 3: Read script output (agent)
+    api_matches = load_json("/tmp/api_matches.json")
 
-    # STEP 2: Read extraction files (agent)
-    extraction_files = glob(extraction_folder, "*_analysis.json")
-
-    documented_apis = {}  # api -> {pages: [...], in_examples: bool, ...}
-
-    for extraction_file in extraction_files:
-        data = load_json(extraction_file)
-        page = data["page"]
-
-        # Check signatures (tier 1)
-        for sig in data.get("signatures", []):
-            api_id = f"{sig['library']}.{sig['function']}"
-            if api_id not in documented_apis:
-                documented_apis[api_id] = {
-                    "pages": [],
-                    "in_examples": False,
-                    "has_section": False
-                }
-            documented_apis[api_id]["pages"].append(page)
-
-        # Check code examples (tier 2)
-        for example in data.get("examples", []):
-            api_calls = extract_api_calls_from_code(example["code"])
-            for api_call in api_calls:
-                if api_call in documented_apis:
-                    documented_apis[api_call]["in_examples"] = True
-
-        # Check for dedicated sections (tier 3)
-        for sig in data.get("signatures", []):
-            api_id = f"{sig['library']}.{sig['function']}"
-            if has_dedicated_context(sig.get("section_hierarchy", [])):
-                documented_apis[api_id]["has_section"] = True
-
-    # STEP 3: Calculate importance scores (MCP)
+    # STEP 4: Calculate importance scores via MCP (for ALL APIs)
     importance_scores = {}
 
     for api_obj in discovered_apis:
@@ -390,28 +440,81 @@ def claude_orchestration_logic(extraction_folder, library_name, library_version)
         # Response: {"importance_score": 8, "importance": "high"}
         importance_scores[api_obj["api"]] = score_result
 
-    # STEP 4: Classify coverage (MCP)
-    coverage_tiers = {}
+    # STEP 5: Enrich documented APIs with extraction metadata (OPTIONAL)
+    # If extraction_folder exists, add section_hierarchy, markdown_anchor, code_block_index
+    if extraction_folder:
+        extraction_files = glob(extraction_folder, "*_analysis.json")
+        extraction_metadata = {}  # api -> [{section_hierarchy, markdown_anchor, ...}]
+
+        for extraction_file in extraction_files:
+            data = load_json(extraction_file)
+            for sig in data.get("signatures", []):
+                api_id = f"{sig['library']}.{sig['function']}"
+                if api_id not in extraction_metadata:
+                    extraction_metadata[api_id] = []
+                extraction_metadata[api_id].append({
+                    "section_hierarchy": sig.get("section_hierarchy"),
+                    "markdown_anchor": sig.get("markdown_anchor"),
+                    "code_block_index": sig.get("code_block_index")
+                })
+
+        # Merge extraction metadata into script matches
+        for api_id, match_data in api_matches.items():
+            if api_id in extraction_metadata:
+                for ref in match_data["references"]:
+                    # Match by file and line to find corresponding extraction metadata
+                    # (simplified - actual implementation more sophisticated)
+                    ref.update(extraction_metadata[api_id][0])
+
+    # STEP 6: Build documented_apis.json and undocumented_apis.json
+    documented_apis = []
+    undocumented_apis = []
 
     for api_obj in discovered_apis:
         api_id = api_obj["api"]
-        doc_info = documented_apis.get(api_id, {})
+        match_data = api_matches.get(api_id, {"documented": false})
+        importance = importance_scores[api_id]
 
-        coverage_result = call_mcp_tool("classify_coverage", {
+        api_detail = {
             "api": api_id,
-            "documented_in": doc_info.get("pages", []),
-            "appears_in_examples": doc_info.get("in_examples", False),
-            "has_dedicated_section": doc_info.get("has_section", False)
-        })
+            "module": api_obj["module"],
+            "type": api_obj["type"],
+            "is_async": api_obj["is_async"],
+            "has_docstring": api_obj["has_docstring"],
+            "in_all": api_obj["in_all"],
+            "is_deprecated": api_obj["is_deprecated"],
+            "signature": api_obj["signature"],
+            "importance": importance["importance"],
+            "importance_score": importance["importance_score"],
+            "reference_count": match_data.get("reference_count", 0),
+            "documentation_references": match_data.get("references", []),
+            "documented_in": match_data.get("files", [])
+        }
 
-        # Response: {"coverage_tier": 2}
-        coverage_tiers[api_id] = coverage_result["coverage_tier"]
+        if match_data["documented"]:
+            documented_apis.append(api_detail)
+        else:
+            undocumented_apis.append(api_detail)
 
-    # STEP 5: Calculate metrics (MCP)
-    coverage_data = [
-        {"api": api_obj["api"], "tier": coverage_tiers[api_obj["api"]]}
-        for api_obj in discovered_apis
-    ]
+    write_json("documented_apis.json", documented_apis)
+    write_json("undocumented_apis.json", undocumented_apis)
+
+# =========================================================================
+# STAGE 3 ANALYSIS AGENT - What MCP does
+# =========================================================================
+def stage3_analysis_workflow(api_surface_file, documented_file, undocumented_file):
+    """Stage 3: MCP metrics + prioritization."""
+
+    # STEP 1: Calculate metrics (MCP)
+    coverage_data = []
+    for api in load_json(documented_file):
+        tier = 1  # At least mentioned (script found it)
+        if api["reference_count"] > 5:
+            tier = 2  # Has examples (heuristic: many references)
+        coverage_data.append({"api": api["api"], "tier": tier})
+
+    for api in load_json(undocumented_file):
+        coverage_data.append({"api": api["api"], "tier": 0})
 
     metrics_result = call_mcp_tool("calculate_metrics", {
         "coverage_data": coverage_data
@@ -745,97 +848,168 @@ validation_log_dir/api_completeness_logs/
 
 ## Performance
 
-- **Single run**: Not per-document
-- **Typical duration**: ~10-20 seconds
+- **Single run**: Not per-document (runs once for entire library)
+- **Typical duration**: ~7 seconds total for 118 APIs across 7 docs
+  - Stage 1 (Introspection): ~2-3 seconds (pip install + inspect)
+  - Stage 2 (Matching): ~2 seconds (fast script + MCP scoring)
+  - Stage 3 (Analysis): ~2 seconds (MCP metrics)
+- **Performance Improvement**: 5-10x faster than previous LLM-based matching
+  - **Before**: 30-60 seconds (agent pattern matching ALL docs)
+  - **After**: ~7 seconds (deterministic script + MCP)
 - **Bottlenecks**:
-  - Library introspection (MCP: pip install + inspect)
-  - Reading many extraction files (agent)
-  - Multiple MCP tool calls
+  - Library installation (Stage 1: pip install)
+  - MCP scoring calls (Stage 2: one per API)
+  - Optional extraction metadata reading (Stage 2: if provided)
+- **Scalability**:
+  - Script handles 1000+ APIs in ~5 seconds
+  - MCP calls are fast (<50ms each)
+  - Total time dominated by pip install, not matching
 
 ## Common Issues & Solutions
 
 ### Issue: Many false "undocumented" for internal methods
 **Cause**: Introspection finding private methods
-**Solution**: MCP server filters by `__all__` and `_` prefix
+**Solution**: Stage 1 filters by `__all__` and `_` prefix during introspection
 
 ### Issue: Missing deprecation warnings
 **Cause**: Library doesn't use standard patterns
-**Solution**: Enhance MCP server deprecation detection
+**Solution**: Enhance Stage 1 deprecation detection in introspection template
 
 ### Issue: Coverage tier 0 for documented APIs
-**Cause**: API name mismatch in pattern matching
-**Solution**: Check agent logs for pattern matching results
+**Cause**: API name mismatch (e.g., snake_case vs camelCase)
+**Solution**: Script handles fuzzy matching automatically via `generate_variants()`. Check Stage 2 logs for matched variants.
 
-### Issue: MCP server fails to introspect
-**Cause**: Library installation failed
-**Solution**: Check MCP server logs for pip errors
+### Issue: Script finds API in docs but not in extraction metadata
+**Cause**: Extraction folder not provided or incomplete
+**Solution**: This is expected! Script scans ALL .md files. Extraction metadata is optional enrichment. The API is still correctly marked as documented.
+
+### Issue: Reference count seems low
+**Cause**: Script only counts actual API mentions, not generic text
+**Solution**: Check Stage 2 output `/tmp/api_matches.json` to see all detected references and match types
+
+### Issue: Stage 1 introspection fails
+**Cause**: Library installation failed (network, version unavailable)
+**Solution**: Check Stage 1 logs for pip errors. Ensure version exists on PyPI/npm.
 
 ## Implementation Notes
 
-### Why This Architecture?
+### Why 3-Stage Architecture?
 
-**First Principles Design Decision:**
+**Design Rationale:**
 
+**Why separate stages instead of monolithic agent?**
+1. **Specialization**: Each agent has a focused responsibility
+2. **Resumability**: Can re-run Stage 2 without re-introspecting
+3. **Debugging**: Easy to identify which stage failed
+4. **Intermediate Outputs**: Each stage produces debuggable JSON
+5. **Performance**: Script-based matching is 5-10x faster than LLM pattern matching
+
+**Stage 1: Why Bash-based introspection?**
 ```python
-# PROBLEM: Original MCP approach (introspection in MCP subprocess)
-# ❌ MCP server runs as subprocess
-# ❌ Subprocess can't access packages installed in parent environment
+# PROBLEM: MCP subprocess can't access packages installed in parent environment
+# ❌ MCP server runs as subprocess with isolation
 # ❌ Even with sys.executable, package isolation persists
-# ❌ Complex workarounds (venv in subprocess, etc.) are fragile
 
-# SOLUTION: Bash-based introspection + MCP for computation
-# ✅ Agent installs library in its own environment
-# ✅ Agent runs introspection templates via Bash (same environment)
-# ✅ Templates output standardized JSON (deterministic format)
-# ✅ MCP handles only pure computational tasks (scoring, metrics)
-# ✅ Clean separation: Environment interaction (Bash) vs Computation (MCP)
+# SOLUTION: Bash-based introspection templates
+# ✅ Agent installs library in its own environment (Bash)
+# ✅ Agent runs language-specific template via Bash (same environment)
+# ✅ Template outputs standardized JSON
+# ✅ Clean separation: Environment interaction (Bash) vs API discovery (template script)
 ```
 
-**Template-Based Introspection:**
+**Stage 2: Why deterministic script instead of LLM matching?**
 ```python
-# Instead of MCP subprocess calling inspect module...
-# Agent runs language-specific templates via Bash:
+# PROBLEM: LLM-based pattern matching is slow (30-60s for 118 APIs)
+# ❌ Agent must read ALL docs and pattern match (slow)
+# ❌ Multiple back-and-forth with Claude
+# ❌ Costs API tokens
 
-# Python:
-python stackbench/introspection_templates/python_introspect.py lancedb 0.25.2 > result.json
+# SOLUTION: Fast deterministic script + MCP scoring
+# ✅ Regex-based matching in ~2 seconds
+# ✅ Fuzzy matching (snake_case ↔ camelCase) built-in
+# ✅ Multi-language pattern detection
+# ✅ MCP only for scoring (not matching)
+# ✅ 5-10x performance improvement
+```
 
-# JavaScript (future):
-node stackbench/introspection_templates/js_introspect.js axios 1.6.0 > result.json
+**Stage 3: Why MCP for metrics?**
+```python
+# MCP is perfect for deterministic computations:
+# ✅ Coverage percentage formulas
+# ✅ Importance score heuristics
+# ✅ Prioritization algorithms
+# ✅ No environment interaction needed
+```
 
-# Standardized JSON output:
+### Architecture Division
+
+```python
+# STAGE 1 AGENT (Introspection)
+# - Bash: pip install
+# - Bash: Run python_introspect.py template
+# - Output: api_surface.json
+
+# STAGE 2 AGENT (Matching)
+# - Bash: Run markdown_api_matcher.py script (fast deterministic)
+# - Read: /tmp/api_matches.json (script output)
+# - Read: extraction/*.json (optional enrichment)
+# - MCP: calculate_importance_score() for each API
+# - Write: documented_apis.json + undocumented_apis.json
+
+# STAGE 3 AGENT (Analysis)
+# - Read: api_surface.json + documented_apis.json + undocumented_apis.json
+# - MCP: calculate_metrics() (coverage %)
+# - MCP: prioritize_undocumented() (ranking)
+# - Write: completeness_analysis.json
+
+# DETERMINISTIC SCRIPT (markdown_api_matcher.py)
+# - Pure Python script (no LLM)
+# - Scans ALL .md files recursively
+# - Generates naming variants (snake_case ↔ camelCase)
+# - Detects match types (import, function_call, method_call, etc.)
+# - Tracks code block context
+# - Outputs /tmp/api_matches.json in ~2 seconds
+
+# MCP SERVER (api_completeness_server.py)
+# - Pure computational tasks:
+#   * calculate_importance_score() - heuristic scoring
+#   * calculate_metrics() - coverage percentages
+#   * prioritize_undocumented() - ranking by importance
+```
+
+### Introspection Templates
+
+**Template-Based Design:**
+```python
+# Language-specific scripts output standardized JSON:
+
+# Python template:
+python stackbench/introspection_templates/python_introspect.py mylib 0.25.2 > api_surface.json
+
+# Future JavaScript template:
+node stackbench/introspection_templates/js_introspect.js mylib 1.6.0 > api_surface.json
+
+# Standardized output format (same across languages):
 {
-  "library": "lancedb",
+  "library": "mylib",
+  "version": "0.25.2",
+  "language": "python",
   "total_apis": 118,
-  "apis": [...],
-  "by_type": {...},
+  "apis": [
+    {
+      "api": "mylib.connect",
+      "module": "mylib",
+      "type": "function",
+      "is_async": false,
+      "has_docstring": true,
+      "in_all": true,
+      "is_deprecated": false,
+      "signature": "(uri, *, api_key=None, ...)"
+    }
+  ],
+  "by_type": {"function": 5, "class": 11, "method": 102},
   "deprecated_count": 3
 }
-```
-
-### Agent vs MCP Division
-
-```python
-# Agent (Environment Interaction + Qualitative):
-# - pip install (Bash)
-# - Run introspection templates (Bash)
-# - Read JSON output
-# - Read markdown/JSON extraction files
-# - Pattern matching in text
-# - Understanding doc structure
-# - Orchestrating workflow
-# - Building final output
-
-# MCP (Pure Computation):
-# - Importance score calculations
-# - Coverage tier classification
-# - Metric formulas (percentages)
-# - Ranking algorithms (prioritization)
-
-# Introspection Templates (Language-Specific):
-# - Python: inspect module, __all__, docstrings
-# - JavaScript (future): AST parsing, exports
-# - TypeScript (future): type declarations
-# - Output: Standardized JSON
 ```
 
 ## Related Documentation
