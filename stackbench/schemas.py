@@ -206,7 +206,7 @@ class EnvironmentInfo(BaseModel):
     version_installed: str
     version_requested: str
     version_match: bool
-    python_version: str
+    runtime_version: str  # Python 3.x.y OR Node.js vX.Y.Z
     installation_output: Optional[str] = None
 
 

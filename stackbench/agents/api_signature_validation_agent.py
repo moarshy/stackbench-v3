@@ -44,13 +44,13 @@ from stackbench.schemas import (
 # PROMPT TEMPLATES
 # ============================================================================
 
-VALIDATION_SYSTEM_PROMPT = """You are an expert Python code introspection specialist.
+VALIDATION_SYSTEM_PROMPT = """You are an expert code introspection specialist for Python, JavaScript, and TypeScript.
 
-Your task is to validate documented API signatures against actual library implementations using Python's introspection tools.
+Your task is to validate documented API signatures against actual library implementations using language-specific introspection tools.
 
 Core capabilities:
-1. Use `inspect.signature()` to get function signatures
-2. Use `inspect.getfullargspec()` for detailed parameter info
+1. **Python**: Use `inspect.signature()` and `inspect.getfullargspec()` for introspection
+2. **JavaScript/TypeScript**: Use runtime imports, JSDoc parsing, or TypeScript compiler API for type info
 3. Handle method chains by introspecting return types
 4. Compare documented vs actual parameters, types, defaults
 5. Categorize issues by severity (critical, warning, info)
@@ -68,31 +68,49 @@ Issue severity guidelines:
 IMPORTANT: Missing optional parameters in documentation is NOT a reason to mark status as "invalid".
 Documentation can be simplified for educational purposes. Only mark as "invalid" if there are critical issues.
 
-Always be thorough and precise. Use Python introspection as the source of truth."""
+Always be thorough and precise. Use language-specific introspection as the source of truth."""
 
 VALIDATION_PROMPT = """Validate all API signatures from this documentation against the actual library.
 
 Library: {library}
 Version: {version}
+Language: {language}
 Document: {document_page}
 
 Signatures to validate:
 {signatures_json}
 
 TASK:
-1. Install the library: pip install {library}=={version}
+1. Install the library using the appropriate package manager:
+   - **Python**: `pip install {library}=={version}`
+   - **JavaScript/TypeScript**: `npm install {library}@{version}` or `yarn add {library}@{version}`
+
 2. For each signature:
    a. Import the library and locate the function/method
-   b. For method chains (e.g., "db.create_table"):
-      - First get the object type returned by the parent (e.g., lancedb.connect returns Database)
+   b. For method chains (e.g., "client.connect"):
+      - First get the object type returned by the parent method
       - Then introspect the method on that type
-   c. Use Python introspection:
-      ```python
-      import inspect
-      sig = inspect.signature(function_or_method)
-      spec = inspect.getfullargspec(function_or_method)
-      # Get params, types, defaults, required vs optional
-      ```
+
+   c. Use language-specific introspection:
+
+   **Python**:
+   ```python
+   import inspect
+   sig = inspect.signature(function_or_method)
+   spec = inspect.getfullargspec(function_or_method)
+   # Get params, types, defaults, required vs optional
+   ```
+
+   **JavaScript/TypeScript**:
+   ```javascript
+   // Runtime introspection
+   const func = require('{library}').functionName;
+   console.log(func.length); // number of parameters
+   console.log(func.toString()); // function source
+
+   // For TypeScript: parse .d.ts files or use ts compiler API
+   ```
+
    d. Compare documented vs actual:
       - Parameter names (order matters for positional)
       - Parameter types (if documented)
@@ -119,9 +137,9 @@ TASK:
       - **WARNING**: Type hint differences for optional params, incorrect default values for documented params
       - **INFO**: Optional parameters not shown in docs (note: this is acceptable and should NOT make status "invalid")
 
-3. Also get environment info:
-   - Check installed version: pip show {library}
-   - Python version: python --version
+3. Also get environment info based on language:
+   - **Python**: `pip show {library}` + `python --version`
+   - **JavaScript/TypeScript**: `npm list {library}` + `node --version`
 
 IMPORTANT STATUS RULES:
 - Missing optional parameters in docs should be "info" severity and status should still be "valid"
@@ -139,8 +157,8 @@ RESPONSE FORMAT - JSON ONLY:
     "version_installed": "x.y.z",
     "version_requested": "{version}",
     "version_match": true,
-    "python_version": "3.x.y",
-    "installation_output": "pip install output..."
+    "runtime_version": "Python 3.x.y OR Node.js vX.Y.Z",
+    "installation_output": "Installation command output..."
   }},
   "validations": [
     {{
@@ -150,21 +168,21 @@ RESPONSE FORMAT - JSON ONLY:
       "status": "valid|invalid|not_found|error",
       "actual": {{
         "params": ["param1", "param2"],
-        "param_types": {{"param1": "str", "param2": "Optional[int]"}},
-        "defaults": {{"param2": "None"}},
+        "param_types": {{"param1": "str|string", "param2": "Optional[int]|number|undefined"}},
+        "defaults": {{"param2": "None|null|undefined"}},
         "required_params": ["param1"],
         "optional_params": ["param2"],
-        "return_type": "Database",
+        "return_type": "Database|Promise<Database>|object",
         "is_async": false,
         "is_method": false,
-        "verified_by": "inspect.signature"
+        "verified_by": "inspect.signature|runtime|typescript-compiler"
       }},
       "issues": [
         {{
           "type": "missing_param_in_docs",
           "severity": "warning",
           "message": "Documented signature missing optional parameter 'param2'",
-          "suggested_fix": "Add to docs: function(param1, param2=None)"
+          "suggested_fix": "Python: function(param1, param2=None) | JS/TS: function(param1, param2 = null)"
         }}
       ],
       "confidence": 0.9
@@ -174,10 +192,10 @@ RESPONSE FORMAT - JSON ONLY:
 ```
 
 IMPORTANT:
-- Use actual Python code execution to verify signatures
+- Use language-specific introspection (Python: inspect module | JS/TS: runtime/compiler API)
 - Be thorough - check every parameter, type, and default
 - Provide clear, actionable suggestions for fixing documentation
-- Handle edge cases: async functions, class methods, properties, method chains
+- Handle edge cases: async functions, class methods, properties, method chains, Promises
 - If a signature is correct, status="valid" with empty issues array
 """
 
@@ -480,7 +498,7 @@ class APISignatureValidationAgent:
                     version_installed="unknown",
                     version_requested=version,
                     version_match=False,
-                    python_version="unknown"
+                    runtime_version="unknown"
                 ),
                 processing_time_ms=processing_time,
                 warnings=["No signatures to validate"]
@@ -492,6 +510,7 @@ class APISignatureValidationAgent:
             prompt = VALIDATION_PROMPT.format(
                 library=library,
                 version=version,
+                language=language,
                 document_page=document_page,
                 signatures_json=signatures_json
             )
@@ -527,7 +546,7 @@ class APISignatureValidationAgent:
                         version_installed="unknown",
                         version_requested=version,
                         version_match=False,
-                        python_version="unknown"
+                        runtime_version="unknown"
                     ),
                     processing_time_ms=processing_time,
                     warnings=warnings
@@ -540,7 +559,7 @@ class APISignatureValidationAgent:
                 version_installed=env_data.get("version_installed", "unknown"),
                 version_requested=env_data.get("version_requested", version),
                 version_match=env_data.get("version_match", False),
-                python_version=env_data.get("python_version", "unknown"),
+                runtime_version=env_data.get("runtime_version", "unknown"),
                 installation_output=env_data.get("installation_output")
             )
 
@@ -744,7 +763,6 @@ class APISignatureValidationAgent:
         validation_duration_seconds = (validation_end_time - validation_start_time).total_seconds()
 
         # Create overall summary
-        total_sigs = sum(r.summary.total_signatures for r in results)
         total_valid = sum(r.summary.valid for r in results)
         total_invalid = sum(r.summary.invalid for r in results)
         total_not_found = sum(r.summary.not_found for r in results)
