@@ -199,35 +199,6 @@ IMPORTANT:
 - If a signature is correct, status="valid" with empty issues array
 """
 
-VALIDATION_SUMMARY_PROMPT = """Based on the validation results, calculate summary statistics:
-
-Validations: {validations_json}
-
-Calculate:
-- total_signatures: count of all validations
-- valid: count where status="valid"
-- invalid: count where status="invalid"
-- not_found: count where status="not_found"
-- error: count where status="error"
-- accuracy_score: valid / total (as decimal)
-- critical_issues: count of issues with severity="critical"
-- warnings: count of issues with severity="warning"
-
-Return JSON:
-```json
-{{
-  "total_signatures": <int>,
-  "valid": <int>,
-  "invalid": <int>,
-  "not_found": <int>,
-  "error": <int>,
-  "accuracy_score": <float>,
-  "critical_issues": <int>,
-  "warnings": <int>
-}}
-```
-"""
-
 
 # ============================================================================
 # VALIDATION AGENT
