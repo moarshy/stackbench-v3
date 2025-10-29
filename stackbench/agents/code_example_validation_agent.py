@@ -41,10 +41,10 @@ from stackbench.schemas import ExampleValidationResult, DocumentValidationResult
 # PROMPT TEMPLATES
 # ============================================================================
 
-VALIDATION_SYSTEM_PROMPT = """You are an expert code validator specializing in validating documentation code examples.
+VALIDATION_SYSTEM_PROMPT = """You are an expert code validator specializing in validating documentation code examples across Python, JavaScript, and TypeScript.
 
 Your task is to:
-1. Execute code examples in isolated virtual environments
+1. Execute code examples in isolated environments (virtualenv for Python, npm/node for JS/TS)
 2. Install required dependencies with exact versions
 3. Handle sequential dependencies (where examples depend on previous ones)
 4. Report success/failure with actionable suggestions
@@ -61,14 +61,21 @@ VALIDATE_EXAMPLES_PROMPT = """Validate the following code examples from document
 
 Library: {library}
 Version: {version}
+Language: {language}
 Document: {page}
 
 Examples to validate:
 {examples_json}
 
 TASK:
-1. Create a virtual environment using Bash tool
-2. Install {library}=={version} and all required dependencies
+1. Create an isolated environment based on language:
+   - **Python**: Create virtualenv using Bash tool
+   - **JavaScript/TypeScript**: Create npm project or use temporary directory
+
+2. Install library and dependencies:
+   - **Python**: `pip install {library}=={version}`
+   - **JavaScript/TypeScript**: `npm install {library}@{version}` or `yarn add {library}@{version}`
+
 3. For each example:
    - Check if it depends on previous examples (uses undefined variables)
    - If independent: Execute in fresh namespace
@@ -84,6 +91,8 @@ ASYNC CODE HANDLING:
 Examples may have an "execution_context" field indicating if they need async handling:
 
 **"async"** - Code contains async/await patterns:
+
+  **Python**:
   - Wrap the code in an async function and run with asyncio
   - Template:
     ```python
@@ -107,6 +116,23 @@ Examples may have an "execution_context" field indicating if they need async han
     asyncio.run(main())
     ```
 
+  **JavaScript/TypeScript**:
+  - Wrap in an async IIFE (Immediately Invoked Function Expression) or use top-level await (if supported)
+  - Template:
+    ```javascript
+    (async () => {
+        // ... original code here ...
+    })();
+    ```
+  - Example: If code is `const data = await client.fetch()`, execute as:
+    ```javascript
+    (async () => {
+        const client = require('{library}');
+        const data = await client.fetch();
+        console.log(data);
+    })();
+    ```
+
 **"sync"** - Regular code:
   - Execute as-is without any wrapping
 
@@ -117,23 +143,28 @@ SEVERITY CLASSIFICATION (for failed examples only):
 Classify each failure by analyzing the error type and context:
 
 **"error"** - Clear documentation mistake that needs fixing:
-  * SyntaxError, IndentationError (malformed code in docs)
-  * NameError for undefined variables (not from dependencies)
-  * ImportError, ModuleNotFoundError (missing imports in docs)
-  * AttributeError on documented API calls (wrong method/attribute name)
-  * TypeError from wrong argument types in user code shown in docs
+  * **Python**: SyntaxError, IndentationError (malformed code)
+  * **JS/TS**: SyntaxError, ReferenceError for undefined variables
+  * **All languages**: Missing imports/requires in docs, wrong API method names
+  * **Python**: NameError for undefined variables (not from dependencies)
+  * **Python**: ImportError, ModuleNotFoundError (missing imports)
+  * **JS/TS**: Cannot find module, ReferenceError
+  * **All languages**: AttributeError/TypeError on documented API calls (wrong method/property name)
+  * **All languages**: Type errors from wrong argument types in user code
   * Any error that occurs in the first few lines of user code
 
 **"warning"** - Likely environment/compatibility issue (not a doc error):
   * Errors deep inside library internals (error in library's internal functions)
   * Version compatibility errors (error message mentions version conflicts)
-  * TypeError in internal library functions (e.g., "_scan_pyarrow_dataset_impl")
+  * **Python**: TypeError in internal library functions (e.g., "_scan_pyarrow_dataset_impl")
+  * **JS/TS**: TypeErrors in node_modules code
   * Dependency conflicts between libraries
   * Errors that occur several stack frames deep into library code
   * Errors with message suggesting updating library versions
 
 **"info"** - Non-blocking informational issues:
-  * DeprecationWarning, FutureWarning
+  * **Python**: DeprecationWarning, FutureWarning
+  * **JS/TS**: Deprecation warnings in console
   * Output format differences (not errors, just different formatting)
   * Performance warnings
 
@@ -152,25 +183,26 @@ RESPONSE FORMAT - JSON ONLY:
     "execution_output": "stdout/stderr output",
     "depends_on_previous": false,
     "depends_on_example_indices": [],
-    "actual_code_executed": "import lancedb\\ndb = lancedb.connect('data/sample-lancedb')"
+    "actual_code_executed": "Python: import mylib\\nclient = mylib.connect() | JS: const mylib = require('mylib'); const client = mylib.connect();"
   }},
   {{
     "example_index": 2,
     "status": "failure",
-    "severity": "warning",
-    "error_message": "TypeError: _scan_pyarrow_dataset_impl() got multiple values for argument 'batch_size'",
-    "suggestions": "This is a compatibility issue between polars and lancedb. Try updating polars or use a workaround like .limit(1).collect() instead of .first().collect()",
+    "severity": "error",
+    "error_message": "Python: NameError: name 'client' is not defined | JS: ReferenceError: client is not defined",
+    "suggestions": "Missing import statement. Add: Python: import mylib\\nclient = mylib.connect() | JS: const {{ connect }} = require('mylib'); const client = connect();",
     "execution_output": "...",
     "depends_on_previous": true,
     "depends_on_example_indices": [0],
-    "actual_code_executed": "import lancedb\\ndb = lancedb.connect('data/sample-lancedb')\\nldf = table.to_polars()\\nprint(ldf.first().collect())"
+    "actual_code_executed": "Full code that was executed, including dependencies from previous examples"
   }}
 ]
 ```
 
 IMPORTANT:
 - Use actual Bash tool execution to run the code
-- Create virtualenv, install packages, execute code
+- **Python**: Create virtualenv, install packages with pip, run with python
+- **JavaScript/TypeScript**: Create npm project, install with npm/yarn, run with node/ts-node
 - Report actual execution results
 - For dependency tracking:
   - `depends_on_example_indices` must list specific example numbers (e.g., [0, 1] means depends on examples 0 and 1)
@@ -179,6 +211,7 @@ IMPORTANT:
   - `severity` is REQUIRED for all failures (status="failure")
   - `severity` should be null for success/skipped
   - Carefully analyze the error to distinguish doc errors from environment issues
+  - Use language-specific error patterns (Python: NameError, ImportError | JS/TS: ReferenceError, Cannot find module)
 - Respond with ONLY the JSON array, no other text"""
 
 
@@ -421,6 +454,7 @@ class ValidationAgent:
             prompt = VALIDATE_EXAMPLES_PROMPT.format(
                 library=library,
                 version=version,
+                language=language,
                 page=page,
                 examples_json=examples_json
             )

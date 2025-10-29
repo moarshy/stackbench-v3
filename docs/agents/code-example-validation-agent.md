@@ -2,12 +2,12 @@
 
 ## Objective
 
-The Code Example Validation Agent validates that code examples in documentation actually work by **executing them in isolated virtual environments**. It:
-- Creates fresh virtual environments for each example
+The Code Example Validation Agent validates that code examples in documentation actually work by **executing them in isolated environments** for **Python, JavaScript, and TypeScript**. It:
+- Creates isolated environments (Python: virtualenv, JS/TS: npm project)
 - Installs exact library version + dependencies
 - Executes code examples and captures output/errors
 - Handles sequential dependencies (examples that build on each other)
-- Handles async/await code properly
+- Handles async/await code properly (Python: asyncio, JS/TS: async IIFE)
 - Classifies failures by severity (error vs warning vs info)
 
 This agent catches **broken code examples** - the most frustrating documentation issue for developers.
@@ -49,9 +49,10 @@ This agent catches **broken code examples** - the most frustrating documentation
 - **`validation_log_dir`** (Path): Directory for validation hooks and logs
 
 ### Environment
-- Python environment with `pip` and `virtualenv`
+- **Python**: Environment with `pip` and `virtualenv`
+- **JavaScript/TypeScript**: Environment with `npm`/`yarn` and `node`/`ts-node`
 - Bash access for running commands
-- Network access for `pip install`
+- Network access for package installation
 
 ## Expected Output
 
@@ -187,19 +188,27 @@ async def validate_document(extraction_file):
     Examples: {json.dumps(examples, indent=2)}
 
     TASK:
-    1. Create virtual environment
-    2. Install {library}=={version}
+    1. Create isolated environment based on language:
+       - Python: Virtual environment
+       - JavaScript/TypeScript: npm project
+    2. Install library:
+       - Python: pip install {library}=={version}
+       - JS/TS: npm install {library}@{version}
     3. For each example:
        a. Check execution_context: sync/async/not_executable
        b. If sync: Execute as-is
-       c. If async: Wrap in asyncio.run()
+       c. If async:
+          - Python: Wrap in asyncio.run()
+          - JS/TS: Wrap in async IIFE
        d. If not_executable: Skip with reason
        e. Track dependencies (which examples it depends on)
        f. Save FULL code executed (including merged dependencies)
        g. If failure: Classify severity (error/warning/info)
 
     SEVERITY CLASSIFICATION:
-    - "error": Clear doc mistake (SyntaxError, NameError in user code, ImportError)
+    - "error": Clear doc mistake
+      * Python: SyntaxError, NameError, ImportError
+      * JS/TS: SyntaxError, ReferenceError, Cannot find module
     - "warning": Environment issue (deep library errors, version conflicts)
     - "info": Non-blocking (DeprecationWarning, format differences)
 
@@ -226,15 +235,22 @@ async def validate_document(extraction_file):
 
 
 # What Claude does internally
-def claude_validation_logic(library, version, examples):
+def claude_validation_logic(library, version, language, examples):
     """Claude's execution process."""
 
-    # 1. Create virtualenv
-    run_bash("python -m venv /tmp/validation_env")
-    run_bash("source /tmp/validation_env/bin/activate")
+    # 1. Create isolated environment (language-specific)
+    if language == "python":
+        run_bash("python -m venv /tmp/validation_env")
+        run_bash("source /tmp/validation_env/bin/activate")
+    elif language in ["javascript", "typescript"]:
+        run_bash("mkdir /tmp/validation_project && cd /tmp/validation_project")
+        run_bash("npm init -y")
 
-    # 2. Install library
-    run_bash(f"pip install {library}=={version}")
+    # 2. Install library (language-specific)
+    if language == "python":
+        run_bash(f"pip install {library}=={version}")
+    elif language in ["javascript", "typescript"]:
+        run_bash(f"npm install {library}@{version}")
 
     validation_results = []
     accumulated_state = {}  # Track variables from previous examples
@@ -264,10 +280,11 @@ def claude_validation_logic(library, version, examples):
             for dep_idx in depends_on_indices:
                 accumulated_state.update(examples[dep_idx]["code"])
 
-        # 6. Prepare code for execution
+        # 6. Prepare code for execution (language-specific)
         if execution_context == "async":
             # Wrap async code
-            actual_code = f"""
+            if language == "python":
+                actual_code = f"""
 import asyncio
 {accumulated_state}
 
@@ -276,13 +293,26 @@ async def main():
 
 asyncio.run(main())
 """
+            elif language in ["javascript", "typescript"]:
+                actual_code = f"""
+{accumulated_state}
+
+(async () => {{
+    {indent(code, '    ')}
+}})();
+"""
         else:
             # Sync code
             actual_code = f"{accumulated_state}\n{code}"
 
-        # 7. Execute
+        # 7. Execute (language-specific)
         try:
-            result = run_bash(f"python -c '{escape(actual_code)}'")
+            if language == "python":
+                result = run_bash(f"python -c '{escape(actual_code)}'")
+            elif language in ["javascript", "typescript"]:
+                # Write to temp file and execute
+                write_file("/tmp/example.js", actual_code)
+                result = run_bash("node /tmp/example.js")
 
             validation_results.append({
                 "example_index": i,
@@ -319,31 +349,46 @@ asyncio.run(main())
     return validation_results
 
 
-def classify_error_severity(error_message):
+def classify_error_severity(error_message, language):
     """Classify error by analyzing error type and stack trace."""
 
-    # Error indicators (clear doc mistake)
-    error_patterns = [
-        "SyntaxError",
-        "IndentationError",
-        "NameError.*in user code",  # Not from library internals
-        "ImportError",
-        "ModuleNotFoundError",
-        "AttributeError.*in documented API call"
-    ]
+    # Error indicators (clear doc mistake) - language-specific
+    if language == "python":
+        error_patterns = [
+            "SyntaxError",
+            "IndentationError",
+            "NameError.*in user code",
+            "ImportError",
+            "ModuleNotFoundError",
+            "AttributeError.*in documented API call"
+        ]
+    elif language in ["javascript", "typescript"]:
+        error_patterns = [
+            "SyntaxError",
+            "ReferenceError",
+            "Cannot find module",
+            "TypeError.*in user code"
+        ]
 
     # Warning indicators (environment/compatibility issue)
-    warning_patterns = [
-        ".*in _.*_impl",  # Internal library functions
-        "version conflict",
-        "TypeError.*in library internals",
-        "deep in library code"
-    ]
+    if language == "python":
+        warning_patterns = [
+            ".*in _.*_impl",  # Internal library functions
+            "version conflict",
+            "TypeError.*in library internals"
+        ]
+    elif language in ["javascript", "typescript"]:
+        warning_patterns = [
+            ".*in node_modules",  # Errors in dependencies
+            "version conflict",
+            "TypeError.*in library code"
+        ]
 
     # Info indicators (non-blocking)
     info_patterns = [
         "DeprecationWarning",
         "FutureWarning",
+        "deprecated",
         "output format difference"
     ]
 
@@ -361,8 +406,9 @@ def classify_error_severity(error_message):
 
 ### 1. **Async Code Handling**
 
-Automatically detects and wraps async code:
+Automatically detects and wraps async code (language-specific):
 
+**Python:**
 ```python
 # Input (execution_context: "async")
 async_db = await lancedb.connect_async(uri)
@@ -376,6 +422,19 @@ async def main():
     return async_db
 
 asyncio.run(main())
+```
+
+**JavaScript/TypeScript:**
+```javascript
+// Input (execution_context: "async")
+const data = await client.fetch();
+
+// Executed as:
+(async () => {
+    const client = require('mylib');
+    const data = await client.fetch();
+    console.log(data);
+})();
 ```
 
 ### 2. **Dependency Tracking**
@@ -393,16 +452,15 @@ Tracks which examples depend on previous ones:
 
 ### 3. **Severity Classification**
 
-**Error** (Clear doc mistake):
-- SyntaxError, IndentationError
-- NameError for undefined variables in user code
-- ImportError, ModuleNotFoundError
-- AttributeError in documented API calls
+**Error** (Clear doc mistake) - language-specific:
+- **Python**: SyntaxError, IndentationError, NameError, ImportError, ModuleNotFoundError
+- **JS/TS**: SyntaxError, ReferenceError, Cannot find module
+- **All**: AttributeError/TypeError in documented API calls
 
-**Warning** (Environment issue):
-- Errors in library internals (`_scan_pyarrow_dataset_impl`)
-- Version compatibility errors
-- TypeError in internal functions
+**Warning** (Environment issue) - language-specific:
+- **Python**: Errors in library internals (`_scan_pyarrow_dataset_impl`)
+- **JS/TS**: Errors in node_modules
+- **All**: Version compatibility errors, TypeError in internal functions
 
 **Info** (Non-blocking):
 - DeprecationWarning, FutureWarning
@@ -491,9 +549,11 @@ def validate_code_validation_json(json_data):
         return False
 ```
 
-### Virtualenv Isolation
+### Environment Isolation
 
-Each document gets a fresh virtualenv:
+Each document gets a fresh isolated environment:
+
+**Python:**
 ```bash
 python -m venv /tmp/stackbench_validation_{uuid}
 source /tmp/stackbench_validation_{uuid}/bin/activate
@@ -501,6 +561,16 @@ pip install {library}=={version}
 # ... run examples ...
 deactivate
 rm -rf /tmp/stackbench_validation_{uuid}
+```
+
+**JavaScript/TypeScript:**
+```bash
+mkdir /tmp/stackbench_validation_{uuid}
+cd /tmp/stackbench_validation_{uuid}
+npm init -y
+npm install {library}@{version}
+# ... run examples ...
+cd .. && rm -rf /tmp/stackbench_validation_{uuid}
 ```
 
 ## Related Documentation

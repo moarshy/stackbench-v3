@@ -2,9 +2,9 @@
 
 ## Objective
 
-The API Signature Validation Agent validates that documented API signatures match the actual library implementation through **dynamic code introspection**. It:
+The API Signature Validation Agent validates that documented API signatures match the actual library implementation through **dynamic code introspection** for **Python, JavaScript, and TypeScript**. It:
 - Installs the exact library version mentioned in documentation
-- Uses Python's `inspect` module to get actual function signatures
+- Uses language-specific introspection tools (Python: `inspect`, JS/TS: runtime/compiler API)
 - Compares documented vs actual parameters, types, and defaults
 - Reports mismatches with actionable suggestions
 
@@ -47,8 +47,9 @@ This agent catches **API documentation drift** - when code evolves but docs don'
 - **`validation_log_dir`** (Path): Directory for validation hooks and logs
 
 ### Environment
-- Python environment with `pip` and `inspect` module
-- Network access for `pip install`
+- **Python**: Environment with `pip` and `inspect` module
+- **JavaScript/TypeScript**: Environment with `npm`/`yarn` and `node`
+- Network access for package installation
 
 ## Expected Output
 
@@ -155,7 +156,7 @@ output_folder/
     "version_installed": "0.25.2",
     "version_requested": "0.25.2",
     "version_match": true,
-    "python_version": "3.11.5",
+    "runtime_version": "Python 3.11.5",
     "installation_output": "Successfully installed lancedb-0.25.2 ..."
   },
 
@@ -204,10 +205,14 @@ async def validate_document(extraction_file):
     Signatures: {json.dumps(signatures)}
 
     TASK:
-    1. Install library: pip install {library}=={version}
+    1. Install library based on language:
+       - Python: pip install {library}=={version}
+       - JavaScript/TypeScript: npm install {library}@{version}
     2. For each signature:
        a. Import library and locate function/method
-       b. Use inspect.signature() to get actual signature
+       b. Use language-specific introspection:
+          - Python: inspect.signature()
+          - JS/TS: runtime introspection or TypeScript compiler API
        c. Compare documented vs actual params, types, defaults
        d. Determine status: valid/invalid/not_found
        e. Classify issue severity: critical/warning/info
@@ -247,15 +252,22 @@ async def validate_document(extraction_file):
 
 
 # What Claude does internally
-def claude_validation_logic(library, version, signatures):
+def claude_validation_logic(library, version, language, signatures):
     """Claude's introspection process."""
 
-    # 1. Install library
-    run_bash(f"pip install {library}=={version}")
+    # 1. Install library (language-specific)
+    if language == "python":
+        run_bash(f"pip install {library}=={version}")
+    elif language in ["javascript", "typescript"]:
+        run_bash(f"npm install {library}@{version}")
 
-    # 2. Get environment info
-    version_installed = run_bash(f"pip show {library} | grep Version")
-    python_version = run_bash("python --version")
+    # 2. Get environment info (language-specific)
+    if language == "python":
+        version_installed = run_bash(f"pip show {library} | grep Version")
+        runtime_version = run_bash("python --version")
+    elif language in ["javascript", "typescript"]:
+        version_installed = run_bash(f"npm list {library} --depth=0")
+        runtime_version = run_bash("node --version")
 
     validations = []
 
@@ -275,14 +287,19 @@ def claude_validation_logic(library, version, signatures):
                 # Direct function
                 actual_func = import_function(library, function_name)
 
-            # 5. Introspect actual signature
-            import inspect
-            actual_sig = inspect.signature(actual_func)
-            actual_spec = inspect.getfullargspec(actual_func)
-
-            actual_params = list(actual_sig.parameters.keys())
-            actual_types = extract_type_hints(actual_func)
-            actual_defaults = extract_defaults(actual_sig)
+            # 5. Introspect actual signature (language-specific)
+            if language == "python":
+                import inspect
+                actual_sig = inspect.signature(actual_func)
+                actual_spec = inspect.getfullargspec(actual_func)
+                actual_params = list(actual_sig.parameters.keys())
+                actual_types = extract_type_hints(actual_func)
+                actual_defaults = extract_defaults(actual_sig)
+            elif language in ["javascript", "typescript"]:
+                # Runtime introspection or TypeScript compiler API
+                actual_params = extract_params_from_function(actual_func)
+                actual_types = parse_typescript_types(library, function_name)
+                actual_defaults = extract_js_defaults(actual_func)
 
             # 6. Compare documented vs actual
             documented_params = sig["params"]
@@ -409,14 +426,14 @@ sig = inspect.signature(create_table_method)
 
 ### 4. **Environment Verification**
 
-Captures installation details:
+Captures installation details (language-specific):
 ```json
 {
   "library_installed": "lancedb",
   "version_installed": "0.25.2",
   "version_requested": "0.25.2",
   "version_match": true,
-  "python_version": "3.11.5"
+  "runtime_version": "Python 3.11.5 OR Node.js v18.17.0"
 }
 ```
 
