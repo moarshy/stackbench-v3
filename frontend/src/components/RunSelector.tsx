@@ -19,7 +19,7 @@ export function RunSelector({ selectedRun, onRunSelect, baseDataDir }: RunSelect
     setError(null);
     try {
       // List directories in data folder
-      const response = await fetch(`/api/files?path=${encodeURIComponent(baseDataDir)}`);
+      const response = await fetch(`/api/files?path=${encodeURIComponent(baseDataDir)}&type=dirs`);
       if (!response.ok) {
         throw new Error('Failed to fetch runs');
       }

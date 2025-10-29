@@ -96,12 +96,21 @@ function App() {
   useEffect(() => {
     if (selectedRun) {
       apiService.setRunId(selectedRun.run_id);
+      // Reset state immediately to avoid showing stale data
+      setDocs([]);
+      setWalkthroughs([]);
+      setApiCompleteness(null);
+      setSelectedDoc(null);
+      setSelectedWalkthrough(null);
+      // Load new data
       loadDocs();
       loadWalkthroughs();
       loadAPICompleteness();
-      // Reset selected doc when run changes
-      setSelectedDoc(null);
-      setSelectedWalkthrough(null);
+    } else {
+      // Clear everything if no run selected
+      setDocs([]);
+      setWalkthroughs([]);
+      setApiCompleteness(null);
     }
   }, [selectedRun]);
 
@@ -122,9 +131,14 @@ function App() {
   const loadDocs = async () => {
     try {
       const files = await apiService.getDocumentationFiles();
+      console.log(`✅ Loaded ${files.length} documentation files for run ${selectedRun?.run_id}`);
       setDocs(files);
+      if (files.length === 0) {
+        console.warn('⚠️ No extraction files found. Check that results/extraction/ directory exists and contains *_analysis.json files');
+      }
     } catch (error) {
-      console.error('Failed to load documentation files:', error);
+      console.error('❌ Failed to load documentation files:', error);
+      setDocs([]);
     }
   };
 
@@ -326,10 +340,10 @@ function App() {
               <div className="flex items-center gap-1 p-1 bg-muted rounded-lg">
                 <button
                   onClick={() => setViewMode('documents')}
-                  className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${
+                  className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 cursor-pointer ${
                     viewMode === 'documents'
                       ? 'bg-background shadow-sm text-foreground'
-                      : 'text-muted-foreground hover:text-foreground'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-background/50'
                   }`}
                 >
                   <FileText className="h-4 w-4" />
@@ -337,10 +351,10 @@ function App() {
                 </button>
                 <button
                   onClick={() => setViewMode('walkthroughs')}
-                  className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${
+                  className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 cursor-pointer ${
                     viewMode === 'walkthroughs'
                       ? 'bg-background shadow-sm text-foreground'
-                      : 'text-muted-foreground hover:text-foreground'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-background/50'
                   }`}
                 >
                   <Route className="h-4 w-4" />
@@ -353,10 +367,10 @@ function App() {
                 </button>
                 <button
                   onClick={() => setViewMode('api-coverage')}
-                  className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${
+                  className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 cursor-pointer ${
                     viewMode === 'api-coverage'
                       ? 'bg-background shadow-sm text-foreground'
-                      : 'text-muted-foreground hover:text-foreground'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-background/50'
                   }`}
                 >
                   <PieChart className="h-4 w-4" />

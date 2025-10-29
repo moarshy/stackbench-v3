@@ -60,7 +60,7 @@ export class APIService {
     // since each extraction file corresponds to a documentation file
     try {
       const extractionPath = this.getRunPath('results/extraction');
-      const response = await fetch(`/api/files?path=${encodeURIComponent(extractionPath)}`);
+      const response = await fetch(`/api/files?path=${encodeURIComponent(extractionPath)}&type=files`);
       if (!response.ok) {
         throw new Error('Failed to fetch documentation files');
       }
@@ -304,7 +304,7 @@ export class APIService {
 
     try {
       const walkthroughsPath = this.getRunPath('walkthroughs');
-      const response = await fetch(`/api/files?path=${encodeURIComponent(walkthroughsPath)}`);
+      const response = await fetch(`/api/files?path=${encodeURIComponent(walkthroughsPath)}&type=dirs`);
       if (!response.ok) {
         return [];
       }
