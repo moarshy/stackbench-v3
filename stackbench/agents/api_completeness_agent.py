@@ -22,25 +22,28 @@ class APICompletenessAgent:
 
     def __init__(
         self,
-        extraction_folder: Path,
+        docs_folder: Path,
         output_folder: Path,
         library_name: str,
         library_version: str,
         language: str = "python",
+        extraction_folder: Optional[Path] = None,
         validation_log_dir: Optional[Path] = None
     ):
         """
         Initialize the completeness agent orchestrator.
 
         Args:
-            extraction_folder: Path to folder with all extraction results
+            docs_folder: Path to documentation root folder (scans ALL .md files)
             output_folder: Path to save completeness analysis
             library_name: Name of library to analyze
             library_version: Version to install and analyze
-            language: Programming language (default: python)
+            language: Programming language (python, javascript, typescript)
+            extraction_folder: Optional path to extraction results (for enrichment)
             validation_log_dir: Optional directory for validation hook tracking logs
         """
-        self.extraction_folder = Path(extraction_folder)
+        self.docs_folder = Path(docs_folder)
+        self.extraction_folder = Path(extraction_folder) if extraction_folder else None
         self.output_folder = Path(output_folder)
         self.output_folder.mkdir(parents=True, exist_ok=True)
         self.library_name = library_name
@@ -49,8 +52,10 @@ class APICompletenessAgent:
         self.validation_log_dir = Path(validation_log_dir) if validation_log_dir else None
 
         print(f"🔍 API Completeness Agent - 3-Stage Pipeline")
-        print(f"   Library: {library_name} v{library_version}")
-        print(f"   Extraction files: {extraction_folder}")
+        print(f"   Library: {library_name} v{library_version} ({language})")
+        print(f"   Documentation folder: {docs_folder}")
+        if self.extraction_folder:
+            print(f"   Extraction folder: {extraction_folder} (for enrichment)")
         print(f"   Output folder: {output_folder}")
 
         if self.validation_log_dir:
@@ -96,8 +101,10 @@ class APICompletenessAgent:
         # Stage 2: Matching
         stage2_agent = MatchingAgent(
             api_surface_file=api_surface_file,
-            extraction_folder=self.extraction_folder,
+            docs_folder=self.docs_folder,
             output_folder=self.output_folder,
+            language=self.language,
+            extraction_folder=self.extraction_folder,
             validation_log_dir=self.validation_log_dir
         )
 

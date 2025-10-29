@@ -32,26 +32,35 @@ load_dotenv(find_dotenv())
 
 MATCHING_SYSTEM_PROMPT = """You are an API documentation matching specialist for Python, JavaScript, and TypeScript.
 
-Your ONLY job is to:
+Your job is to:
 1. Read api_surface.json (all discovered APIs)
-2. Read ALL extraction files (documented APIs)
-3. Match APIs to documentation using pattern matching
-4. Use MCP to calculate importance scores
-5. Write documented_apis.json and undocumented_apis.json
+2. Run deterministic markdown_api_matcher.py script to find API mentions
+3. Read api_matches.json (script output with fuzzy matches)
+4. Use MCP to calculate importance scores for each API
+5. Enrich documented APIs with extraction metadata (if available)
+6. Write documented_apis.json and undocumented_apis.json
 
 **Available MCP Tool:**
 - `calculate_importance_score(api, module, type, has_docstring, in_all)` - Returns importance score (0-10) and tier (high/medium/low)
 
 **Your workflow:**
 1. Read {api_surface_file}
-2. Read all *_analysis.json files from {extraction_folder}
-3. For each API, check if it appears in:
-   - signatures (function/class names)
-   - code examples (import statements, function calls)
+2. Run script: `python stackbench/introspection_templates/markdown_api_matcher.py {docs_folder} {api_surface_file} /tmp/api_matches.json {language}`
+3. Read /tmp/api_matches.json
 4. For each API, call MCP calculate_importance_score
-5. Split into documented vs undocumented
+5. Enrich documented APIs with extraction metadata (if available from {extraction_folder})
 6. Write {documented_output_file}
 7. Write {undocumented_output_file}
+
+**The script handles:**
+- Scanning ALL .md files in docs folder (fast, deterministic)
+- Fuzzy matching (snake_case ↔ camelCase)
+- Multi-language pattern matching
+
+**You handle:**
+- MCP importance scoring
+- Metadata enrichment
+- JSON output formatting
 
 **Pattern Matching Tips (Multi-Language):**
 
@@ -83,7 +92,9 @@ Focus on accurate matching and comprehensive coverage!"""
 MATCHING_PROMPT = """Match discovered APIs to documentation.
 
 API Surface File: {api_surface_file}
-Extraction Folder: {extraction_folder}
+Documentation Folder: {docs_folder}
+Extraction Folder: {extraction_folder} (optional - for enrichment)
+Language: {language}
 Documented Output: {documented_output_file}
 Undocumented Output: {undocumented_output_file}
 
@@ -95,56 +106,28 @@ Read the file: {api_surface_file}
 
 This contains all {total_apis} APIs discovered via introspection.
 
-STEP 2: Read Extraction Files
-==============================
-Read ALL *_analysis.json files from: {extraction_folder}
+STEP 2: Run Deterministic Matching Script
+==========================================
+```bash
+python stackbench/introspection_templates/markdown_api_matcher.py \\
+    {docs_folder} \\
+    {api_surface_file} \\
+    /tmp/api_matches.json \\
+    {language}
+```
 
-For each extraction file, examine:
-- signatures: List of documented API signatures
-- examples: List of code examples
+This script will:
+- Scan ALL .md files in {docs_folder} recursively
+- Find API mentions using fuzzy pattern matching (snake_case ↔ camelCase)
+- Output: /tmp/api_matches.json with reference details
 
-STEP 3: Match APIs to Documentation
-====================================
-For each API from api_surface.json, determine if it's documented by checking:
+STEP 3: Read Script Output
+===========================
+Read /tmp/api_matches.json
 
-1. **Signature matching**: Does the API name appear in any signature's function/class name?
-   - Example: "connect" matches signature with function="connect"
-   - Example: "Table.search" matches class="Table", method="search"
-   - Example: "createTable" matches function="createTable" (JS/TS)
-
-2. **Code example matching**: Does the API appear in code examples?
-
-   **Python:**
-   - "mylib.connect(" in code
-   - "db.create_table(" in code
-   - "import mylib" in code
-   - "from mylib import connect" in code
-
-   **JavaScript:**
-   - "require('mylib')" in code
-   - "mylib.connect(" in code
-   - "db.createTable(" in code
-   - "const {{ connect }} = require('mylib')" in code
-
-   **TypeScript:**
-   - "import mylib from 'mylib'" in code
-   - "import {{ connect }} from 'mylib'" in code
-   - "const db: Database =" in code
-   - "db.createTable<T>(" in code
-
-3. **Naming Convention Flexibility**:
-   - Match snake_case (Python) to camelCase (JS/TS) variations:
-     - "create_table" matches "createTable"
-     - "Table.add_data" matches "Table.addData"
-   - Match exact names first, then flexible names
-
-4. **Build references**: For each match, record:
-   - document: filename
-   - section_hierarchy: breadcrumb
-   - markdown_anchor: section ID
-   - line_number: line in doc
-   - context_type: "signature" or "example"
-   - raw_context: human-readable description
+This contains:
+- For each API: documented (true/false), references (list), files (list), reference_count (int)
+- Reference details: file, line, context, match_type, matched_variant, in_code_block
 
 STEP 4: Calculate Importance Scores (MCP)
 ==========================================
@@ -169,7 +152,22 @@ Returns:
   "breakdown": {{"in_all": 3, "has_docstring": 2, "not_private": 1, "common_name": 1}}
 }}
 
-STEP 5: Write Documented APIs
+STEP 5: Enrich with Extraction Metadata (Optional)
+===================================================
+If {extraction_folder} exists and is provided:
+- Read *_analysis.json files from {extraction_folder}
+- Look for APIs that match documented APIs from script output
+- Add section_hierarchy, markdown_anchor from extraction metadata
+- This enriches the references with additional context
+
+Example enrichment:
+- Script found: "mylib.connect" in quickstart.md line 42
+- Extraction has: quickstart_analysis.json with section "Quick Start > Connection"
+- Enrich reference with: section_hierarchy: ["Quick Start", "Connection"], markdown_anchor: "#connection"
+
+If extraction_folder is not provided or doesn't exist, skip this step.
+
+STEP 6: Write Documented APIs
 ==============================
 Write to: {documented_output_file}
 
@@ -188,24 +186,27 @@ Format:
       "signature": "(...)",
       "importance": "high",
       "importance_score": 9,
+      "reference_count": 5,
       "documentation_references": [
         {{
           "document": "quickstart.md",
-          "section_hierarchy": ["Quick Start", "Connection"],
-          "markdown_anchor": "#connection",
           "line_number": 15,
-          "context_type": "signature",
-          "code_block_index": 0,
-          "raw_context": "Connect to database"
+          "context": "import mylib",
+          "match_type": "import",
+          "matched_variant": "mylib",
+          "in_code_block": true,
+          "section_hierarchy": ["Quick Start", "Installation"],  # Optional: from extraction
+          "markdown_anchor": "#installation"  # Optional: from extraction
         }},
         {{
           "document": "quickstart.md",
-          "section_hierarchy": ["Quick Start", "Example"],
-          "markdown_anchor": "#example",
-          "line_number": 25,
-          "context_type": "example",
-          "code_block_index": 1,
-          "raw_context": "Example: Basic connection"
+          "line_number": 42,
+          "context": "db = mylib.connect('./data')",
+          "match_type": "function_call",
+          "matched_variant": "mylib.connect",
+          "in_code_block": true,
+          "section_hierarchy": ["Quick Start", "Basic Usage"],  # Optional: from extraction
+          "markdown_anchor": "#basic-usage"  # Optional: from extraction
         }}
       ],
       "documented_in": ["quickstart.md"],
@@ -214,7 +215,7 @@ Format:
   ]
 }}
 
-STEP 6: Write Undocumented APIs
+STEP 7: Write Undocumented APIs
 ================================
 Write to: {undocumented_output_file}
 
@@ -239,10 +240,12 @@ Format:
 }}
 
 **IMPORTANT:**
-- Be thorough in pattern matching
-- Record ALL references (don't truncate)
+- Use script output as source of truth for which files mention each API
 - Call MCP for importance scores on EVERY API
-- Documented APIs should have documentation_references array
+- Enrich with extraction metadata if available
+- Record ALL references from script output (don't truncate)
+- Include reference_count for documented APIs
+- Documented APIs should have documentation_references array with match_type, context, etc.
 - Undocumented APIs should have importance score and reason
 """
 
@@ -253,15 +256,19 @@ class MatchingAgent:
     def __init__(
         self,
         api_surface_file: Path,
-        extraction_folder: Path,
+        docs_folder: Path,
         output_folder: Path,
+        language: str = "python",
+        extraction_folder: Optional[Path] = None,
         validation_log_dir: Optional[Path] = None
     ):
         """Initialize the matching agent."""
         self.api_surface_file = Path(api_surface_file)
-        self.extraction_folder = Path(extraction_folder)
+        self.docs_folder = Path(docs_folder)
+        self.extraction_folder = Path(extraction_folder) if extraction_folder else None
         self.output_folder = Path(output_folder)
         self.output_folder.mkdir(parents=True, exist_ok=True)
+        self.language = language
         self.validation_log_dir = Path(validation_log_dir) if validation_log_dir else None
 
         self.documented_output = self.output_folder / "documented_apis.json"
@@ -274,7 +281,10 @@ class MatchingAgent:
 
         print(f"🔍 Stage 2: Matching Agent")
         print(f"   API Surface: {self.api_surface_file} ({self.total_apis} APIs)")
-        print(f"   Extraction Folder: {self.extraction_folder}")
+        print(f"   Documentation Folder: {self.docs_folder}")
+        if self.extraction_folder:
+            print(f"   Extraction Folder: {self.extraction_folder} (for enrichment)")
+        print(f"   Language: {self.language}")
         print(f"   Documented Output: {self.documented_output}")
         print(f"   Undocumented Output: {self.undocumented_output}")
 
@@ -316,7 +326,9 @@ class MatchingAgent:
         async with ClaudeSDKClient(options=options) as client:
             prompt = MATCHING_PROMPT.format(
                 api_surface_file=str(self.api_surface_file),
-                extraction_folder=str(self.extraction_folder),
+                docs_folder=str(self.docs_folder),
+                extraction_folder=str(self.extraction_folder) if self.extraction_folder else "None (optional)",
+                language=self.language,
                 documented_output_file=str(self.documented_output),
                 undocumented_output_file=str(self.undocumented_output),
                 total_apis=self.total_apis
@@ -361,17 +373,21 @@ async def main():
     import sys
 
     if len(sys.argv) < 4:
-        print("Usage: python matching_agent.py <api_surface.json> <extraction_folder> <output_dir>")
+        print("Usage: python matching_agent.py <api_surface.json> <docs_folder> <output_dir> [language] [extraction_folder]")
         sys.exit(1)
 
     api_surface_file = Path(sys.argv[1])
-    extraction_folder = Path(sys.argv[2])
+    docs_folder = Path(sys.argv[2])
     output_dir = Path(sys.argv[3])
+    language = sys.argv[4] if len(sys.argv) > 4 else "python"
+    extraction_folder = Path(sys.argv[5]) if len(sys.argv) > 5 else None
 
     agent = MatchingAgent(
         api_surface_file=api_surface_file,
-        extraction_folder=extraction_folder,
-        output_folder=output_dir
+        docs_folder=docs_folder,
+        output_folder=output_dir,
+        language=language,
+        extraction_folder=extraction_folder
     )
 
     result = await agent.run()
