@@ -26,6 +26,22 @@ dependencies = [
     "python-dotenv>=1.0.0",
 ]
 
+[project.optional-dependencies]
+# Vector search support for DocuMentor MCP server (Phase 5)
+# Install with: pip install stackbench[vector-search]
+vector-search = [
+    "sentence-transformers>=2.0.0",  # Semantic embeddings (~80MB model)
+    "numpy>=1.20.0",                 # Array operations
+    "scikit-learn>=1.0.0",           # Cosine similarity, metrics
+]
+
+# Install all optional features
+all = [
+    "sentence-transformers>=2.0.0",
+    "numpy>=1.20.0",
+    "scikit-learn>=1.0.0",
+]
+
 [project.scripts]
 stackbench = "stackbench.cli:main"
 
