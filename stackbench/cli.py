@@ -859,6 +859,221 @@ def readme_llm_generate(
         raise typer.Exit(1)
 
 
+@readme_llm_app.command("mcp")
+def readme_llm_mcp_serve(
+    knowledge_base: str = typer.Option(
+        ...,
+        "--knowledge-base-path",
+        "-k",
+        help="Path to knowledge_base/ directory",
+    ),
+):
+    """
+    Start DocuMentor MCP server (stdio mode).
+
+    The MCP server provides LLM-friendly tools to interact with the README.LLM
+    knowledge base:
+
+    Tools:
+    - get_library_overview: Retrieve library metadata
+    - find_api: Search for APIs by keyword
+    - get_examples: Search for code examples
+    - report_issue: Collect user feedback
+
+    Example:
+        stackbench readme-llm mcp \\
+            --knowledge-base-path data/run_abc123/readme_llm/knowledge_base
+
+    The server runs in stdio mode for MCP communication.
+    """
+    try:
+        console.print("\n[bold cyan]🔌 Starting DocuMentor MCP Server[/bold cyan]")
+        console.print(f"Knowledge Base: [cyan]{knowledge_base}[/cyan]")
+
+        # Validate knowledge base path
+        kb_path = Path(knowledge_base)
+        if not kb_path.exists():
+            console.print(f"[red]Error: Knowledge base not found: {kb_path}[/red]")
+            raise typer.Exit(1)
+
+        # Import server
+        from stackbench.readme_llm.mcp_servers.documentor_server import DocuMentorServer
+        import asyncio
+
+        console.print("\n[dim]Server starting in stdio mode...[/dim]")
+        console.print("[dim]Use Ctrl+C to stop the server[/dim]\n")
+
+        # Create and run server
+        server = DocuMentorServer(kb_path)
+        asyncio.run(server.run())
+
+    except KeyboardInterrupt:
+        console.print("\n\n[yellow]Server stopped by user[/yellow]")
+    except Exception as e:
+        console.print(f"\n[red]❌ Error: {e}[/red]")
+        import traceback
+        traceback.print_exc()
+        raise typer.Exit(1)
+
+
+@readme_llm_app.command("analyze-feedback")
+def readme_llm_analyze_feedback(
+    feedback_file: str = typer.Option(
+        ...,
+        "--feedback-file",
+        "-f",
+        help="Path to feedback.jsonl file",
+    ),
+    output: Optional[str] = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Path to save report JSON (optional)",
+    ),
+    show_details: bool = typer.Option(
+        False,
+        "--show-details",
+        help="Show detailed issue list in terminal",
+    ),
+):
+    """
+    Analyze user feedback collected via DocuMentor MCP server.
+
+    This command processes feedback issues to:
+    - Identify patterns (frequently reported APIs/examples)
+    - Prioritize issues by severity and frequency
+    - Generate actionable recommendations
+    - Export comprehensive report
+
+    Example:
+        stackbench readme-llm analyze-feedback \\
+            --feedback-file data/run_abc123/readme_llm/feedback.jsonl \\
+            --output feedback_report.json \\
+            --show-details
+
+    The feedback file is generated when users call the report_issue tool
+    through the MCP server.
+    """
+    try:
+        console.print("\n[bold cyan]📊 Analyzing Feedback[/bold cyan]")
+        console.print(f"Feedback File: [cyan]{feedback_file}[/cyan]")
+
+        # Validate feedback file
+        fb_path = Path(feedback_file)
+        if not fb_path.exists():
+            console.print(f"[red]Error: Feedback file not found: {fb_path}[/red]")
+            raise typer.Exit(1)
+
+        # Import analyzer
+        from stackbench.readme_llm.mcp_servers.feedback_analyzer import FeedbackAnalyzer
+
+        console.print("\n[dim]Loading and analyzing feedback...[/dim]\n")
+
+        # Create analyzer
+        analyzer = FeedbackAnalyzer(fb_path)
+        report = analyzer.generate_report()
+
+        # Display summary
+        console.print("[bold]📈 Summary[/bold]\n")
+
+        summary_table = Table(show_header=True, header_style="bold cyan")
+        summary_table.add_column("Metric")
+        summary_table.add_column("Value", justify="right")
+
+        summary = report["summary"]
+        summary_table.add_row("Total Issues", str(summary["total_issues"]))
+
+        if summary["total_issues"] > 0:
+            summary_table.add_row("", "")  # Spacer
+
+            # By severity
+            for severity, count in summary["by_severity"].items():
+                color = {
+                    "critical": "red",
+                    "high": "yellow",
+                    "medium": "blue",
+                    "low": "dim"
+                }.get(severity, "white")
+                summary_table.add_row(f"  {severity.capitalize()}", f"[{color}]{count}[/{color}]")
+
+            summary_table.add_row("", "")  # Spacer
+
+            # By type
+            for issue_type, count in summary["by_type"].items():
+                summary_table.add_row(f"  {issue_type.replace('_', ' ').title()}", str(count))
+
+        console.print(summary_table)
+
+        # Display recommendations
+        if report["recommendations"]:
+            console.print("\n[bold]💡 Recommendations[/bold]\n")
+            for rec in report["recommendations"]:
+                console.print(f"  {rec}")
+
+        # Display patterns
+        if report["patterns"]:
+            console.print("\n[bold]🔍 Patterns Identified[/bold]\n")
+            for i, pattern in enumerate(report["patterns"][:5], 1):  # Top 5
+                console.print(f"  {i}. {pattern['description']} ([yellow]{pattern['count']} issues[/yellow])")
+
+        # Display top priorities
+        if report["priorities"]:
+            console.print("\n[bold]⚡ Top Priority Issues[/bold]\n")
+
+            priorities_table = Table(show_header=True, header_style="bold cyan")
+            priorities_table.add_column("Issue ID", width=20)
+            priorities_table.add_column("Type", width=20)
+            priorities_table.add_column("Severity", width=10)
+            priorities_table.add_column("Score", justify="right", width=8)
+            priorities_table.add_column("Description", width=60)
+
+            for priority in report["priorities"][:10]:  # Top 10
+                issue = priority["issue"]
+                score = priority["priority_score"]
+
+                severity_color = {
+                    "critical": "red",
+                    "high": "yellow",
+                    "medium": "blue",
+                    "low": "dim"
+                }.get(issue["severity"], "white")
+
+                priorities_table.add_row(
+                    issue["issue_id"],
+                    issue["issue_type"].replace("_", " ").title(),
+                    f"[{severity_color}]{issue['severity']}[/{severity_color}]",
+                    str(score),
+                    issue["description"][:60] + ("..." if len(issue["description"]) > 60 else "")
+                )
+
+            console.print(priorities_table)
+
+        # Show detailed issues if requested
+        if show_details and report["summary"]["total_issues"] > 0:
+            console.print("\n[bold]📋 All Issues[/bold]\n")
+            for issue in analyzer.issues[:20]:  # Limit to 20 in terminal
+                console.print(f"  [{issue.severity}] {issue.issue_type}: {issue.description[:80]}")
+                if issue.api_id:
+                    console.print(f"    API: [cyan]{issue.api_id}[/cyan]")
+                if issue.example_id:
+                    console.print(f"    Example: [cyan]{issue.example_id}[/cyan]")
+                console.print()
+
+        # Export report if output specified
+        if output:
+            output_path = Path(output)
+            analyzer.export_report(output_path)
+            console.print(f"\n[bold green]✅ Report exported to:[/bold green] [cyan]{output_path}[/cyan]")
+        else:
+            console.print("\n[dim]Tip: Use --output to save the full report as JSON[/dim]")
+
+    except Exception as e:
+        console.print(f"\n[red]❌ Error: {e}[/red]")
+        import traceback
+        traceback.print_exc()
+        raise typer.Exit(1)
+
+
 def main():
     """Entry point for the CLI."""
     app()
