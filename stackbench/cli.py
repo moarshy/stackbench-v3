@@ -718,6 +718,147 @@ def walkthrough_run(
         raise typer.Exit(1)
 
 
+# ============================================================================
+# README.LLM COMMANDS
+# ============================================================================
+
+readme_llm_app = typer.Typer(
+    name="readme-llm",
+    help="Generate LLM-optimized documentation (README.LLM system)",
+)
+app.add_typer(readme_llm_app, name="readme-llm")
+
+
+@readme_llm_app.command("generate")
+def readme_llm_generate(
+    docs_path: str = typer.Option(..., "--docs-path", "-d", help="Path to documentation directory"),
+    library: str = typer.Option(..., "--library", "-l", help="Library name (e.g., lancedb)"),
+    version: str = typer.Option(..., "--version", "-v", help="Library version (e.g., 0.25.2)"),
+    languages: Optional[str] = typer.Option(
+        None,
+        "--languages",
+        help="Comma-separated languages (e.g., python,typescript). Auto-detected if omitted.",
+    ),
+    output_format: str = typer.Option(
+        "both",
+        "--output-format",
+        "-f",
+        help="Output format: monolithic (README.LLM), knowledge_base (JSON), or both (default: both)",
+    ),
+    max_contexts: int = typer.Option(
+        50,
+        "--max-contexts",
+        help="Maximum API contexts in README.LLM (default: 50)",
+    ),
+    output: Optional[str] = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Output directory (default: ./data/<run-id>/readme_llm)",
+    ),
+):
+    """
+    Generate README.LLM from documentation (standalone mode).
+
+    This command processes documentation to create LLM-optimized outputs:
+    - README.LLM: Monolithic XML file with interleaved API + examples
+    - knowledge_base/: Structured JSON for DocuMentor MCP server
+
+    The system will:
+    1. Scan documentation for code examples
+    2. Auto-detect programming languages (or use --languages)
+    3. Introspect the library to discover APIs
+    4. Match code examples to APIs
+    5. Generate README.LLM and/or knowledge base
+
+    Example (auto-detect languages):
+        stackbench readme-llm generate \\
+            --docs-path docs/src \\
+            --library lancedb \\
+            --version 0.25.2
+
+    Example (specify languages):
+        stackbench readme-llm generate \\
+            --docs-path docs/src \\
+            --library lancedb \\
+            --version 0.25.2 \\
+            --languages python,typescript \\
+            --output-format both
+    """
+    try:
+        console.print("\n[bold cyan]📚 README.LLM Generation[/bold cyan]")
+        console.print(f"Library: [yellow]{library} {version}[/yellow]")
+        console.print(f"Documentation: [cyan]{docs_path}[/cyan]")
+
+        # Parse languages
+        language_list = None
+        if languages:
+            language_list = [lang.strip() for lang in languages.split(",")]
+            console.print(f"Languages: [green]{', '.join(language_list)}[/green]")
+        else:
+            console.print(f"Languages: [yellow]Auto-detect[/yellow]")
+
+        # Validate output format
+        if output_format not in ("monolithic", "knowledge_base", "both"):
+            console.print(f"[red]Error: Invalid output format '{output_format}'[/red]")
+            console.print("Valid options: monolithic, knowledge_base, both")
+            raise typer.Exit(1)
+
+        # Import generator
+        from stackbench.readme_llm import ReadMeLLMGenerator
+
+        # Create generator
+        generator = ReadMeLLMGenerator(
+            docs_path=Path(docs_path),
+            library_name=library,
+            library_version=version,
+            output_dir=Path(output) if output else None,
+            languages=language_list,
+            generation_mode="standalone"
+        )
+
+        console.print("\n[bold]Starting generation pipeline...[/bold]\n")
+
+        # Run generation
+        with console.status("[bold green]Processing...") as status:
+            result = generator.generate(
+                output_format=output_format,
+                max_contexts=max_contexts
+            )
+
+        # Display results
+        console.print("\n[bold green]✅ Generation Complete![/bold green]\n")
+
+        summary_table = Table(show_header=True, header_style="bold cyan")
+        summary_table.add_column("Metric")
+        summary_table.add_column("Value", justify="right")
+
+        summary_table.add_row("Library", f"{result.library_name} {result.library_version}")
+        summary_table.add_row("Languages", ", ".join(result.languages))
+        summary_table.add_row("Total APIs", str(result.total_apis))
+        summary_table.add_row("Total Examples", str(result.total_examples))
+        summary_table.add_row("Generation Mode", result.generation_mode)
+
+        for lang, count in result.apis_by_language.items():
+            summary_table.add_row(f"  {lang.capitalize()} APIs", str(count))
+
+        console.print(summary_table)
+
+        if result.readme_llm_path:
+            console.print(f"\n📄 README.LLM: [cyan]{result.readme_llm_path}[/cyan]")
+
+        if result.knowledge_base_path:
+            console.print(f"📁 Knowledge Base: [cyan]{result.knowledge_base_path}[/cyan]")
+
+        console.print(f"\n[dim]Run ID: {result.run_id}[/dim]")
+
+    except Exception as e:
+        console.print(f"\n[red]❌ Error: {e}[/red]")
+        import traceback
+        traceback.print_exc()
+        raise typer.Exit(1)
+
+
 def main():
     """Entry point for the CLI."""
     app()

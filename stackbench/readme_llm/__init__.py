@@ -10,18 +10,19 @@ Main Components:
 - Introspection: Wrapper for language-specific introspection templates
 - Matchers: Link code examples to APIs
 - Formatters: Generate README.LLM (XML) and knowledge base (JSON)
-- Generator Agent: Orchestrates the entire generation process
+- Generator: Orchestrates the entire generation process
 
 Usage:
-    from stackbench.readme_llm import ReadMeLLMGeneratorAgent, KnowledgeBase
+    from stackbench.readme_llm import ReadMeLLMGenerator
+    from pathlib import Path
 
     # Standalone mode
-    agent = ReadMeLLMGeneratorAgent(
-        docs_path="docs/",
+    generator = ReadMeLLMGenerator(
+        docs_path=Path("docs/"),
         library_name="lancedb",
         library_version="0.25.2"
     )
-    result = agent.generate()
+    result = generator.generate()
 
 Architecture follows the walkthroughs/ pattern for standalone operation.
 """
@@ -46,7 +47,12 @@ from .schemas import (
     ReadMeLLMOutput,
 )
 
+from .generator import ReadMeLLMGenerator
+
 __all__ = [
+    # Main generator
+    "ReadMeLLMGenerator",
+
     # Extraction schemas
     "CodeExample",
     "IntrospectionResult",
