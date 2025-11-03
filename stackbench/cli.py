@@ -867,6 +867,17 @@ def readme_llm_mcp_serve(
         "-k",
         help="Path to knowledge_base/ directory",
     ),
+    search_mode: str = typer.Option(
+        "hybrid",
+        "--search-mode",
+        "-m",
+        help="Search mode: keyword (fast, exact) or hybrid (keyword + semantic)",
+    ),
+    vector_model: Optional[str] = typer.Option(
+        None,
+        "--vector-model",
+        help="Sentence-transformer model (default: all-MiniLM-L6-v2)",
+    ),
 ):
     """
     Start DocuMentor MCP server (stdio mode).
@@ -876,19 +887,36 @@ def readme_llm_mcp_serve(
 
     Tools:
     - get_library_overview: Retrieve library metadata
-    - find_api: Search for APIs by keyword
+    - find_api: Search for APIs
     - get_examples: Search for code examples
     - report_issue: Collect user feedback
 
-    Example:
+    Search Modes:
+    - keyword: Fast TF-IDF-based search with exact matching
+    - hybrid: Combines keyword + semantic (sentence-transformers) search
+
+    Example (hybrid mode):
         stackbench readme-llm mcp \\
-            --knowledge-base-path data/run_abc123/readme_llm/knowledge_base
+            --knowledge-base-path data/run_abc123/readme_llm/knowledge_base \\
+            --search-mode hybrid
+
+    Example (keyword-only mode):
+        stackbench readme-llm mcp \\
+            --knowledge-base-path data/run_abc123/readme_llm/knowledge_base \\
+            --search-mode keyword
 
     The server runs in stdio mode for MCP communication.
     """
     try:
         console.print("\n[bold cyan]🔌 Starting DocuMentor MCP Server[/bold cyan]")
         console.print(f"Knowledge Base: [cyan]{knowledge_base}[/cyan]")
+        console.print(f"Search Mode: [yellow]{search_mode}[/yellow]")
+
+        # Validate search mode
+        if search_mode not in ["keyword", "hybrid"]:
+            console.print(f"[red]Error: Invalid search mode '{search_mode}'[/red]")
+            console.print("Valid modes: keyword, hybrid")
+            raise typer.Exit(1)
 
         # Validate knowledge base path
         kb_path = Path(knowledge_base)
@@ -900,11 +928,18 @@ def readme_llm_mcp_serve(
         from stackbench.readme_llm.mcp_servers.documentor_server import DocuMentorServer
         import asyncio
 
+        if vector_model:
+            console.print(f"Vector Model: [cyan]{vector_model}[/cyan]")
+
         console.print("\n[dim]Server starting in stdio mode...[/dim]")
         console.print("[dim]Use Ctrl+C to stop the server[/dim]\n")
 
         # Create and run server
-        server = DocuMentorServer(kb_path)
+        server = DocuMentorServer(
+            kb_path,
+            search_mode=search_mode,
+            vector_model=vector_model
+        )
         asyncio.run(server.run())
 
     except KeyboardInterrupt:

@@ -2,10 +2,23 @@
 
 from .documentor_server import DocuMentorServer
 from .feedback_analyzer import FeedbackAnalyzer
-from .retrieval import KeywordRetrieval
+from .retrieval import KeywordRetrieval, HybridRetrieval
 
-__all__ = [
-    "DocuMentorServer",
-    "FeedbackAnalyzer",
-    "KeywordRetrieval",
-]
+# Conditional import for vector search
+try:
+    from .retrieval import VectorRetrieval
+    __all__ = [
+        "DocuMentorServer",
+        "FeedbackAnalyzer",
+        "KeywordRetrieval",
+        "VectorRetrieval",
+        "HybridRetrieval",
+    ]
+except ImportError:
+    # sentence-transformers not available
+    __all__ = [
+        "DocuMentorServer",
+        "FeedbackAnalyzer",
+        "KeywordRetrieval",
+        "HybridRetrieval",
+    ]

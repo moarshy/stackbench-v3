@@ -33,7 +33,7 @@ from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 from pydantic import BaseModel, Field
 
-from stackbench.readme_llm.mcp_servers.retrieval import KeywordRetrieval
+from stackbench.readme_llm.mcp_servers.retrieval import KeywordRetrieval, HybridRetrieval
 from stackbench.readme_llm.schemas import FeedbackIssue
 
 # Configure logging
@@ -94,19 +94,37 @@ class DocuMentorServer:
     - Feedback collection
     """
 
-    def __init__(self, knowledge_base_path: Path):
+    def __init__(
+        self,
+        knowledge_base_path: Path,
+        search_mode: str = "hybrid",
+        vector_model: Optional[str] = None,
+    ):
         """
         Initialize DocuMentor server.
 
         Args:
             knowledge_base_path: Path to knowledge_base/ directory
+            search_mode: Search mode - "keyword", "vector", or "hybrid" (default)
+            vector_model: Sentence-transformer model name (optional, for vector/hybrid)
         """
         self.kb_path = Path(knowledge_base_path)
         self.server = Server("documentor")
+        self.search_mode = search_mode
 
-        # Initialize retrieval system
-        logger.info(f"Initializing KeywordRetrieval with knowledge base: {self.kb_path}")
-        self.retrieval = KeywordRetrieval(self.kb_path)
+        # Initialize retrieval system based on mode
+        if search_mode == "keyword":
+            logger.info(f"Initializing KeywordRetrieval with knowledge base: {self.kb_path}")
+            self.retrieval = KeywordRetrieval(self.kb_path)
+        elif search_mode == "hybrid":
+            logger.info(f"Initializing HybridRetrieval with knowledge base: {self.kb_path}")
+            self.retrieval = HybridRetrieval(
+                self.kb_path,
+                vector_model=vector_model,
+                enable_vector=True
+            )
+        else:
+            raise ValueError(f"Invalid search mode: {search_mode}. Must be 'keyword' or 'hybrid'.")
 
         # Load library overview
         self.library_overview = self._load_library_overview()
@@ -431,6 +449,19 @@ def main():
         required=True,
         help="Path to knowledge_base/ directory"
     )
+    parser.add_argument(
+        "--search-mode",
+        type=str,
+        default="hybrid",
+        choices=["keyword", "hybrid"],
+        help="Search mode: keyword (fast, exact) or hybrid (keyword + semantic, default)"
+    )
+    parser.add_argument(
+        "--vector-model",
+        type=str,
+        default=None,
+        help="Sentence-transformer model name (default: all-MiniLM-L6-v2)"
+    )
 
     args = parser.parse_args()
 
@@ -441,7 +472,11 @@ def main():
 
     # Create and run server
     try:
-        server = DocuMentorServer(args.knowledge_base_path)
+        server = DocuMentorServer(
+            args.knowledge_base_path,
+            search_mode=args.search_mode,
+            vector_model=args.vector_model
+        )
         import asyncio
         asyncio.run(server.run())
     except Exception as e:
